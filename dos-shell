@@ -1,0 +1,88 @@
+#!/bin/bash
+# /usr/local/bin/dos-shell
+# 1) reset C: drive contents to only the allowed files
+# 2) launch dosemu with /cdrive mounted as C:
+
+set -euo pipefail
+
+ALLOWED_LIST="/etc/dos_allowed"
+ALLOWED_REPO="/opt/allowed_repo"   # repository of allowed DOS files stored in container
+C_DRIVE="/cdrive"
+ENV_DIR="/etc/dos_env"
+AUTOEXEC_TEMPLATE="${ENV_DIR}/AUTOEXEC.BAT"
+CONFIG_TEMPLATE="${ENV_DIR}/CONFIG.SYS"
+
+if [ "$(id -u)" -eq 0 ] && [ ! -d "${ENV_DIR}" ]; then
+  mkdir -p "${ENV_DIR}"
+fi
+
+# clear C: drive to ensure only allowed programs are present
+rm -rf "${C_DRIVE:?}/"*
+mkdir -p "${C_DRIVE}"
+
+# Collect the list of allowed files and sync them into the C: drive
+allowed_entries=()
+if [ -f "${ALLOWED_LIST}" ]; then
+  while IFS= read -r line || [ -n "$line" ]; do
+    # trim whitespace
+    line="$(printf '%s' "$line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+    # skip blank/comment lines
+    case "$line" in
+      ''|\#*) continue ;;
+    esac
+    allowed_entries+=("$line")
+  done < "${ALLOWED_LIST}"
+fi
+
+# Copy allowed files into the DOS C: drive
+for entry in "${allowed_entries[@]}"; do
+  src="${ALLOWED_REPO}/${entry}"
+  if [ -e "$src" ]; then
+    dst_dir="$(dirname "${entry}")"
+    mkdir -p "${C_DRIVE}/${dst_dir}"
+    cp -a "$src" "${C_DRIVE}/${dst_dir}/"
+  else
+    echo "Warning: allowed file not found: $src" >&2
+  fi
+done
+
+# Optional: create an AUTOEXEC.BAT and CONFIG.SYS or other DOS boot files
+autoexec_path="${C_DRIVE}/AUTOEXEC.BAT"
+config_path="${C_DRIVE}/CONFIG.SYS"
+
+if [ -f "${AUTOEXEC_TEMPLATE}" ]; then
+  cp "${AUTOEXEC_TEMPLATE}" "${autoexec_path}"
+else
+  cat > "${autoexec_path}" <<'EOF'
+@echo off
+prompt [DOS]$P$G
+echo Welcome to the containerized DOS environment.
+EOF
+fi
+
+if [ ${#allowed_entries[@]} -gt 0 ]; then
+  {
+    printf 'echo Allowed programs:\r\n'
+    for entry in "${allowed_entries[@]}"; do
+      dos_entry="${entry//\//\\}"
+      printf 'echo   %s\r\n' "${dos_entry}"
+    done
+  } >> "${autoexec_path}"
+else
+  {
+    printf 'echo No extra programs are currently enabled.\r\n'
+  } >> "${autoexec_path}"
+fi
+
+if [ -f "${CONFIG_TEMPLATE}" ]; then
+  cp "${CONFIG_TEMPLATE}" "${config_path}"
+fi
+
+# Drop privileges to dosuser if we were run as root (ssh will run as the user)
+# but in case sshd runs ForceCommand as root, we switch.
+if [ "$(id -u)" -eq 0 ]; then
+  exec runuser -u dosuser -- dosemu -quiet -K "${C_DRIVE}"
+else
+  # running as the user already
+  exec dosemu -quiet -K "${C_DRIVE}"
+fi

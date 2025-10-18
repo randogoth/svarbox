@@ -1,0 +1,5 @@
+# List relative paths under /opt/allowed_repo that should be copied into C:\
+# Examples:
+#   utils/debug.exe
+#   games/prince/prince.exe
+# Leave empty to boot with only the default DOS tools bundled with dosemu.
