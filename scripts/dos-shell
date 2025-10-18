@@ -30,9 +30,8 @@ fi
 
 DOSEMU_DIR="${DOS_HOME}/.dosemu"
 C_DRIVE="${DOSEMU_DIR}/drive_c"
-DOSEMURC_PATH="${DOS_HOME}/.dosemurc"
 INSTALL_MARKER="${DOSEMU_DIR}/${INSTALL_SENTINEL}"
-DOSEMU_ARGS=(-quiet -t -K "${C_DRIVE}")
+DOSEMU_ARGS=(-dumb -K "${C_DRIVE}")
 allowed_entries=()
 
 mkdir -p "${DOSEMU_DIR}" "${C_DRIVE}"
@@ -48,13 +47,10 @@ set_install_marker() {
 }
 
 has_svardos_installation() {
-  if [ -f "${C_DRIVE}/KERNEL.SYS" ] || [ -f "${C_DRIVE}/kernel.sys" ]; then
+  if [ -f "${C_DRIVE}/COMMAND.COM" ] || [ -f "${C_DRIVE}/command.com" ]; then
     return 0
   fi
-  if [ -f "${C_DRIVE}/BIN/PKG.EXE" ] || [ -f "${C_DRIVE}/bin/pkg.exe" ]; then
-    return 0
-  fi
-  if [ -d "${C_DRIVE}/SVARDOS" ] || [ -d "${C_DRIVE}/svardos" ]; then
+  if [ -d "${C_DRIVE}/SVARDOS/BIN" ] || [ -d "${C_DRIVE}/svardos/bin" ]; then
     return 0
   fi
   return 1
@@ -83,24 +79,51 @@ stage_initial_install() {
   rm -rf "${C_DRIVE:?}/"*
 
   cp -a "${SVARDOS_BASE}/." "${C_DRIVE}/"
-  set_install_marker
+
+  if [ "$(id -u)" -eq 0 ]; then
+    chown -R "${DOS_USER}:${DOS_USER}" "${DOSEMU_DIR}"
+  fi
+
+  if [ -f "${DOS_HOME}/.dosemurc" ]; then
+    rm -f "${DOS_HOME}/.dosemurc"
+  fi
+
   echo "SvarDOS base staged to ${C_DRIVE}"
 }
 
-generate_dosemurc() {
-  local boot_target="$1"
-  {
-    printf "%s\n" "\$_hdimage = \"${C_DRIVE}\""
-    printf "%s\n" "\$_boot = \"${boot_target}\""
-    printf "%s\n" "\$_emusys = \"drdos\""
-    printf "%s\n" "\$_fdpp = (off)"
-  } > "${DOSEMURC_PATH}"
-  if [ -f "${ENV_DIR}/dosemurc" ]; then
-    cat "${ENV_DIR}/dosemurc" >> "${DOSEMURC_PATH}"
+run_headless_install() {
+  local log_file="${DOSEMU_DIR}/install.log"
+  local comspec=''
+  if [ -f "${C_DRIVE}/CMD.COM" ]; then
+    comspec='C:\CMD.COM'
+  elif [ -f "${C_DRIVE}/COMMAND.COM" ]; then
+    comspec='C:\COMMAND.COM'
+  else
+    echo "SvarDOS provisioning failed: no command interpreter found on ${C_DRIVE}." >&2
+    return 1
   fi
+  local command="${comspec} /C AUTOEXEC.BAT"
+  local status
+
   if [ "$(id -u)" -eq 0 ]; then
-    chown "${DOS_USER}:${DOS_USER}" "${DOSEMURC_PATH}"
+    runuser -u "${DOS_USER}" -- dosemu -dumb -K "${C_DRIVE}" -E "${command}" >"${log_file}" 2>&1
+    status=$?
+  else
+    dosemu -dumb -K "${C_DRIVE}" -E "${command}" >"${log_file}" 2>&1
+    status=$?
   fi
+
+  if [ "${status}" -ne 0 ]; then
+    echo "SvarDOS provisioning failed (dosemu exit ${status}). See ${log_file} for details." >&2
+    return 1
+  fi
+
+  if [ -f "${C_DRIVE}/INSTALL.BAT" ]; then
+    echo "SvarDOS provisioning did not complete successfully (INSTALL.BAT still present). See ${log_file}." >&2
+    return 1
+  fi
+
+  return 0
 }
 
 sync_allowed_content() {
@@ -153,9 +176,14 @@ apply_templates() {
 
 if needs_install; then
   stage_initial_install
+  echo "Running initial SvarDOS provisioning..."
+  if run_headless_install; then
+    set_install_marker
+    echo "SvarDOS provisioning complete."
+  else
+    exit 1
+  fi
 fi
-
-generate_dosemurc "c"
 
 sync_allowed_content
 apply_templates

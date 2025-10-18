@@ -33,6 +33,28 @@ if [ "$(find "${unpack_dir}" -mindepth 1 -maxdepth 1 -type d | wc -l)" -eq 1 ] &
   unpack_dir="$(find "${unpack_dir}" -mindepth 1 -maxdepth 1 -type d)"
 fi
 
+# Adjust installer to place pkg.cfg where modern pkg expects it.
+install_bat="${unpack_dir}/INSTALL.BAT"
+if [ -f "${install_bat}" ]; then
+  sed -i 's|cfg\\pkg\.cfg|PKG.CFG|Ig' "${install_bat}"
+fi
+
+autoexec_bat="${unpack_dir}/AUTOEXEC.BAT"
+if [ -f "${autoexec_bat}" ] && ! grep -qi '^SET[[:space:]]\+PKGCFG=' "${autoexec_bat}"; then
+  tmp_autoexec="${tmpdir}/autoexec.new"
+  awk '
+    BEGIN{added=0}
+    {
+      print
+      if (!added && toupper($0) ~ /^SET[[:space:]]+DOSDIR=/) {
+        print "SET PKGCFG=%DOSDIR%\\PKG.CFG"
+        added=1
+      }
+    }
+  ' "${autoexec_bat}" > "${tmp_autoexec}"
+  mv "${tmp_autoexec}" "${autoexec_bat}"
+fi
+
 rm -rf "${SVARDOS_BASE_DIR:?}/"*
 cp -a "${unpack_dir}/." "${SVARDOS_BASE_DIR}/"
 
