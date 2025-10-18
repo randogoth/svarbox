@@ -11,6 +11,8 @@ C_DRIVE="/cdrive"
 ENV_DIR="/etc/dos_env"
 AUTOEXEC_TEMPLATE="${ENV_DIR}/AUTOEXEC.BAT"
 CONFIG_TEMPLATE="${ENV_DIR}/CONFIG.SYS"
+SVARDOS_BASE="/opt/svardos/base"
+ALLOW_MODE="${DOS_ALLOW_MODE:-all}"   # default to exposing everything from the repo
 
 if [ "$(id -u)" -eq 0 ] && [ ! -d "${ENV_DIR}" ]; then
   mkdir -p "${ENV_DIR}"
@@ -20,31 +22,54 @@ fi
 rm -rf "${C_DRIVE:?}/"*
 mkdir -p "${C_DRIVE}"
 
-# Collect the list of allowed files and sync them into the C: drive
-allowed_entries=()
-if [ -f "${ALLOWED_LIST}" ]; then
-  while IFS= read -r line || [ -n "$line" ]; do
-    # trim whitespace
-    line="$(printf '%s' "$line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-    # skip blank/comment lines
-    case "$line" in
-      ''|\#*) continue ;;
-    esac
-    allowed_entries+=("$line")
-  done < "${ALLOWED_LIST}"
+# Seed the C: drive with the SvarDOS base image
+if [ -e "${SVARDOS_BASE}/COMMAND.COM" ] || [ -e "${SVARDOS_BASE}/command.com" ]; then
+  cp -a "${SVARDOS_BASE}/." "${C_DRIVE}/"
+else
+  echo "SvarDOS base not found in ${SVARDOS_BASE}. Aborting." >&2
+  exit 1
 fi
 
-# Copy allowed files into the DOS C: drive
-for entry in "${allowed_entries[@]}"; do
-  src="${ALLOWED_REPO}/${entry}"
-  if [ -e "$src" ]; then
-    dst_dir="$(dirname "${entry}")"
-    mkdir -p "${C_DRIVE}/${dst_dir}"
-    cp -a "$src" "${C_DRIVE}/${dst_dir}/"
-  else
-    echo "Warning: allowed file not found: $src" >&2
+# Sync additional DOS files into the C: drive
+allowed_entries=()
+case "${ALLOW_MODE}" in
+  all)
+    if [ -d "${ALLOWED_REPO}" ] && [ "$(ls -A "${ALLOWED_REPO}")" ]; then
+      cp -a "${ALLOWED_REPO}/." "${C_DRIVE}/"
+    fi
+    ;;
+  list|allowlist)
+    ;;
+  *)
+    echo "Unknown DOS_ALLOW_MODE '${ALLOW_MODE}', falling back to allowlist mode." >&2
+    ALLOW_MODE="list"
+    ;;
+esac
+
+if [ "${ALLOW_MODE}" != "all" ]; then
+  if [ -f "${ALLOWED_LIST}" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+      # trim whitespace
+      line="$(printf '%s' "$line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
+      # skip blank/comment lines
+      case "$line" in
+        ''|\#*) continue ;;
+      esac
+      allowed_entries+=("$line")
+    done < "${ALLOWED_LIST}"
   fi
-done
+
+  for entry in "${allowed_entries[@]}"; do
+    src="${ALLOWED_REPO}/${entry}"
+    if [ -e "$src" ]; then
+      dst_dir="$(dirname "${entry}")"
+      mkdir -p "${C_DRIVE}/${dst_dir}"
+      cp -a "$src" "${C_DRIVE}/${dst_dir}/"
+    else
+      echo "Warning: allowed file not found: $src" >&2
+    fi
+  done
+fi
 
 # Optional: create an AUTOEXEC.BAT and CONFIG.SYS or other DOS boot files
 autoexec_path="${C_DRIVE}/AUTOEXEC.BAT"
@@ -60,7 +85,9 @@ echo Welcome to the containerized DOS environment.
 EOF
 fi
 
-if [ ${#allowed_entries[@]} -gt 0 ]; then
+if [ "${ALLOW_MODE}" = "all" ]; then
+  printf 'echo All repository programs are currently enabled.\r\n' >> "${autoexec_path}"
+elif [ ${#allowed_entries[@]} -gt 0 ]; then
   {
     printf 'echo Allowed programs:\r\n'
     for entry in "${allowed_entries[@]}"; do

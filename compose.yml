@@ -1,0 +1,21 @@
+services:
+  dos:
+    build:
+      context: .
+      args:
+        SVARDOS_IMG_URL: ${SVARDOS_IMG_URL:-}
+    image: ${DOS_IMAGE_NAME:-dos-env}
+    container_name: ${DOS_CONTAINER_NAME:-dos-env}
+    ports:
+      - "${DOS_SSH_PORT:-2222}:22"
+      - "${DOS_TELNET_PORT:-2323}:23"
+    environment:
+      DOS_ALLOW_MODE: ${DOS_ALLOW_MODE:-all}
+      ENABLE_TELNET: ${ENABLE_TELNET:-1}
+      TELNET_PORT: ${TELNET_PORT:-23}
+      TELNET_LOGIN: /bin/login
+    volumes:
+      - ./allowed_repo:/opt/allowed_repo
+      - ./config/dos_allowed:/etc/dos_allowed:ro
+      - ./dos_env:/etc/dos_env
+    restart: unless-stopped
