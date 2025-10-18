@@ -1,57 +1,128 @@
 #!/bin/bash
 # /usr/local/bin/dos-shell
-# 1) reset C: drive contents to only the allowed files
-# 2) launch dosemu with /cdrive mounted as C:
+# Prepare the SvarDOS environment and launch dosemu.
 
 set -euo pipefail
 
 ALLOWED_LIST="/etc/dos_allowed"
-ALLOWED_REPO="/opt/allowed_repo"   # repository of allowed DOS files stored in container
-C_DRIVE="/cdrive"
+ALLOWED_REPO="/opt/allowed_repo"
 ENV_DIR="/etc/dos_env"
 AUTOEXEC_TEMPLATE="${ENV_DIR}/AUTOEXEC.BAT"
 CONFIG_TEMPLATE="${ENV_DIR}/CONFIG.SYS"
-SVARDOS_BASE="/opt/svardos/base"
-ALLOW_MODE="${DOS_ALLOW_MODE:-all}"   # default to exposing everything from the repo
+SVARDOS_ROOT="${SVARDOS_ROOT:-/opt/svardos}"
+SVARDOS_BASE="${SVARDOS_BASE:-${SVARDOS_ROOT}/base}"
+ALLOW_MODE="${DOS_ALLOW_MODE:-all}"
+DEFAULT_DOS_USER="dosuser"
+INSTALL_SENTINEL=".svardos_installed"
 
+if [ "$(id -u)" -eq 0 ]; then
+  DOS_USER="${DEFAULT_DOS_USER}"
+  DOS_HOME="$(getent passwd "${DOS_USER}" | cut -d: -f6)"
+else
+  DOS_USER="$(id -un)"
+  DOS_HOME="${HOME}"
+fi
+
+if [ -z "${DOS_HOME}" ]; then
+  echo "Unable to determine home directory for ${DOS_USER}" >&2
+  exit 1
+fi
+
+DOSEMU_DIR="${DOS_HOME}/.dosemu"
+C_DRIVE="${DOSEMU_DIR}/drive_c"
+DOSEMURC_PATH="${DOS_HOME}/.dosemurc"
+INSTALL_MARKER="${DOSEMU_DIR}/${INSTALL_SENTINEL}"
+DOSEMU_ARGS=(-quiet -t -K "${C_DRIVE}")
+allowed_entries=()
+
+mkdir -p "${DOSEMU_DIR}" "${C_DRIVE}"
 if [ "$(id -u)" -eq 0 ] && [ ! -d "${ENV_DIR}" ]; then
   mkdir -p "${ENV_DIR}"
 fi
 
-# clear C: drive to ensure only allowed programs are present
-rm -rf "${C_DRIVE:?}/"*
-mkdir -p "${C_DRIVE}"
+set_install_marker() {
+  touch "${INSTALL_MARKER}"
+  if [ "$(id -u)" -eq 0 ]; then
+    chown "${DOS_USER}:${DOS_USER}" "${INSTALL_MARKER}"
+  fi
+}
 
-# Seed the C: drive with the SvarDOS base image
-if [ -e "${SVARDOS_BASE}/COMMAND.COM" ] || [ -e "${SVARDOS_BASE}/command.com" ]; then
+has_svardos_installation() {
+  if [ -f "${C_DRIVE}/KERNEL.SYS" ] || [ -f "${C_DRIVE}/kernel.sys" ]; then
+    return 0
+  fi
+  if [ -f "${C_DRIVE}/BIN/PKG.EXE" ] || [ -f "${C_DRIVE}/bin/pkg.exe" ]; then
+    return 0
+  fi
+  if [ -d "${C_DRIVE}/SVARDOS" ] || [ -d "${C_DRIVE}/svardos" ]; then
+    return 0
+  fi
+  return 1
+}
+
+needs_install() {
+  if [ "${DOS_FORCE_INSTALL:-0}" = "1" ]; then
+    return 0
+  fi
+  if [ -f "${INSTALL_MARKER}" ]; then
+    return 1
+  fi
+  if has_svardos_installation; then
+    set_install_marker
+    return 1
+  fi
+  return 0
+}
+
+stage_initial_install() {
+  if [ ! -d "${SVARDOS_BASE}" ] || [ -z "$(ls -A "${SVARDOS_BASE}")" ]; then
+    echo "SvarDOS base directory ${SVARDOS_BASE} is empty. Aborting." >&2
+    exit 1
+  fi
+
+  rm -rf "${C_DRIVE:?}/"*
+
   cp -a "${SVARDOS_BASE}/." "${C_DRIVE}/"
-else
-  echo "SvarDOS base not found in ${SVARDOS_BASE}. Aborting." >&2
-  exit 1
-fi
+  set_install_marker
+  echo "SvarDOS base staged to ${C_DRIVE}"
+}
 
-# Sync additional DOS files into the C: drive
-allowed_entries=()
-case "${ALLOW_MODE}" in
-  all)
-    if [ -d "${ALLOWED_REPO}" ] && [ "$(ls -A "${ALLOWED_REPO}")" ]; then
+generate_dosemurc() {
+  local boot_target="$1"
+  {
+    printf "%s\n" "\$_hdimage = \"${C_DRIVE}\""
+    printf "%s\n" "\$_boot = \"${boot_target}\""
+    printf "%s\n" "\$_emusys = \"drdos\""
+    printf "%s\n" "\$_fdpp = (off)"
+  } > "${DOSEMURC_PATH}"
+  if [ -f "${ENV_DIR}/dosemurc" ]; then
+    cat "${ENV_DIR}/dosemurc" >> "${DOSEMURC_PATH}"
+  fi
+  if [ "$(id -u)" -eq 0 ]; then
+    chown "${DOS_USER}:${DOS_USER}" "${DOSEMURC_PATH}"
+  fi
+}
+
+sync_allowed_content() {
+  allowed_entries=()
+  local mode="${ALLOW_MODE}"
+  if [ "${mode}" = "all" ]; then
+    if [ -d "${ALLOWED_REPO}" ] && [ "$(ls -A "${ALLOWED_REPO}" 2>/dev/null)" ]; then
       cp -a "${ALLOWED_REPO}/." "${C_DRIVE}/"
+      allowed_entries+=("ALL")
     fi
-    ;;
-  list|allowlist)
-    ;;
-  *)
-    echo "Unknown DOS_ALLOW_MODE '${ALLOW_MODE}', falling back to allowlist mode." >&2
-    ALLOW_MODE="list"
-    ;;
-esac
+    return
+  fi
 
-if [ "${ALLOW_MODE}" != "all" ]; then
+  if [ "${mode}" != "list" ] && [ "${mode}" != "allowlist" ]; then
+    echo "Unknown DOS_ALLOW_MODE '${mode}', defaulting to allowlist mode." >&2
+    mode="list"
+    ALLOW_MODE="${mode}"
+  fi
+
   if [ -f "${ALLOWED_LIST}" ]; then
     while IFS= read -r line || [ -n "$line" ]; do
-      # trim whitespace
       line="$(printf '%s' "$line" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')"
-      # skip blank/comment lines
       case "$line" in
         ''|\#*) continue ;;
       esac
@@ -69,47 +140,41 @@ if [ "${ALLOW_MODE}" != "all" ]; then
       echo "Warning: allowed file not found: $src" >&2
     fi
   done
+}
+
+apply_templates() {
+  if [ -f "${AUTOEXEC_TEMPLATE}" ]; then
+    cp "${AUTOEXEC_TEMPLATE}" "${C_DRIVE}/AUTOEXEC.BAT"
+  fi
+  if [ -f "${CONFIG_TEMPLATE}" ]; then
+    cp "${CONFIG_TEMPLATE}" "${C_DRIVE}/CONFIG.SYS"
+  fi
+}
+
+if needs_install; then
+  stage_initial_install
 fi
 
-# Optional: create an AUTOEXEC.BAT and CONFIG.SYS or other DOS boot files
-autoexec_path="${C_DRIVE}/AUTOEXEC.BAT"
-config_path="${C_DRIVE}/CONFIG.SYS"
+generate_dosemurc "c"
 
-if [ -f "${AUTOEXEC_TEMPLATE}" ]; then
-  cp "${AUTOEXEC_TEMPLATE}" "${autoexec_path}"
-else
-  cat > "${autoexec_path}" <<'EOF'
-@echo off
-prompt [DOS]$P$G
-echo Welcome to the containerized DOS environment.
-EOF
-fi
+sync_allowed_content
+apply_templates
 
-if [ "${ALLOW_MODE}" = "all" ]; then
-  printf 'echo All repository programs are currently enabled.\r\n' >> "${autoexec_path}"
-elif [ ${#allowed_entries[@]} -gt 0 ]; then
-  {
-    printf 'echo Allowed programs:\r\n'
-    for entry in "${allowed_entries[@]}"; do
-      dos_entry="${entry//\//\\}"
-      printf 'echo   %s\r\n' "${dos_entry}"
-    done
-  } >> "${autoexec_path}"
-else
-  {
-    printf 'echo No extra programs are currently enabled.\r\n'
-  } >> "${autoexec_path}"
-fi
-
-if [ -f "${CONFIG_TEMPLATE}" ]; then
-  cp "${CONFIG_TEMPLATE}" "${config_path}"
-fi
-
-# Drop privileges to dosuser if we were run as root (ssh will run as the user)
-# but in case sshd runs ForceCommand as root, we switch.
 if [ "$(id -u)" -eq 0 ]; then
-  exec runuser -u dosuser -- dosemu -quiet -K "${C_DRIVE}"
+  chown -R "${DOS_USER}:${DOS_USER}" "${DOSEMU_DIR}"
+fi
+
+if [ "${ALLOW_MODE}" = "all" ] && [ "${#allowed_entries[@]}" -gt 0 ]; then
+  echo "All files in ${ALLOWED_REPO} are available on drive C:."
+elif [ "${#allowed_entries[@]}" -gt 0 ]; then
+  echo "Allowlisted files copied to C: from ${ALLOWED_REPO}:"
+  for entry in "${allowed_entries[@]}"; do
+    echo "  ${entry}"
+  done
+fi
+
+if [ "$(id -u)" -eq 0 ]; then
+  exec runuser -u "${DOS_USER}" -- dosemu "${DOSEMU_ARGS[@]}"
 else
-  # running as the user already
-  exec dosemu -quiet -K "${C_DRIVE}"
+  exec dosemu "${DOSEMU_ARGS[@]}"
 fi

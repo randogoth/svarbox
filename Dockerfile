@@ -16,7 +16,6 @@ RUN apt-get update && \
       unzip \
       file \
       && add-apt-repository -y ppa:dosemu2/ppa && \
-      apt-get update && \
       apt-get install -y --no-install-recommends \
         dosemu2 \
       && rm -rf /var/lib/apt/lists/*
