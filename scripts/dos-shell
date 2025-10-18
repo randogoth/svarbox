@@ -31,7 +31,32 @@ fi
 DOSEMU_DIR="${DOS_HOME}/.dosemu"
 C_DRIVE="${DOSEMU_DIR}/drive_c"
 INSTALL_MARKER="${DOSEMU_DIR}/${INSTALL_SENTINEL}"
-DOSEMU_ARGS=(-dumb -K "${C_DRIVE}")
+detect_dosemu_args() {
+  local mode="${DOS_TERMINAL_MODE:-auto}"
+  if [ "${mode}" = "auto" ]; then
+    if [ -n "${DISPLAY:-}" ]; then
+      mode="x"
+    else
+      mode="terminal"
+    fi
+  fi
+
+  case "${mode,,}" in
+    x|sdl|window|gui)
+      DOSEMU_ARGS=(-X -K "${C_DRIVE}")
+      ;;
+    terminal|tty|text)
+      DOSEMU_ARGS=(-td -K "${C_DRIVE}")
+      ;;
+    dumb)
+      DOSEMU_ARGS=(-dumb -K "${C_DRIVE}")
+      ;;
+    *)
+      echo "Unknown DOS_TERMINAL_MODE '${mode}', defaulting to terminal mode." >&2
+      DOSEMU_ARGS=(-td -K "${C_DRIVE}")
+      ;;
+  esac
+}
 allowed_entries=()
 
 mkdir -p "${DOSEMU_DIR}" "${C_DRIVE}"
@@ -180,11 +205,14 @@ if needs_install; then
   if run_headless_install; then
     set_install_marker
     echo "SvarDOS provisioning complete."
+    echo "Disconnecting. Reconnect via SSH to start the SvarDOS shell."
+    exit 0
   else
     exit 1
   fi
 fi
 
+detect_dosemu_args
 sync_allowed_content
 apply_templates
 

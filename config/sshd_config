@@ -6,7 +6,9 @@ PermitRootLogin no
 PasswordAuthentication yes
 ChallengeResponseAuthentication no
 UsePAM yes
-X11Forwarding no
+X11Forwarding yes
+X11DisplayOffset 10
+X11UseLocalhost no
 PrintMotd no
 AcceptEnv LANG LC_*
 Subsystem   sftp    /usr/lib/openssh/sftp-server
