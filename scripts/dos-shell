@@ -13,7 +13,7 @@ SVARDOS_ROOT="${SVARDOS_ROOT:-/opt/svardos}"
 SVARDOS_BASE="${SVARDOS_BASE:-${SVARDOS_ROOT}/base}"
 ALLOW_MODE="${DOS_ALLOW_MODE:-all}"
 DEFAULT_DOS_USER="dosuser"
-INSTALL_SENTINEL=".svardos_installed"
+INSTALL_SENTINEL_NAME=".svardos_installed"
 
 if [ "$(id -u)" -eq 0 ]; then
   DOS_USER="${DEFAULT_DOS_USER}"
@@ -30,7 +30,9 @@ fi
 
 DOSEMU_DIR="${DOS_HOME}/.dosemu"
 C_DRIVE="${DOSEMU_DIR}/drive_c"
-INSTALL_MARKER="${DOSEMU_DIR}/${INSTALL_SENTINEL}"
+INSTALL_SENTINEL_PATH="${DOSEMU_DIR}/${INSTALL_SENTINEL_NAME}"
+DOSEMU_ARGS=()
+
 detect_dosemu_args() {
   local mode="${DOS_TERMINAL_MODE:-auto}"
   if [ "${mode}" = "auto" ]; then
@@ -64,38 +66,7 @@ if [ "$(id -u)" -eq 0 ] && [ ! -d "${ENV_DIR}" ]; then
   mkdir -p "${ENV_DIR}"
 fi
 
-set_install_marker() {
-  touch "${INSTALL_MARKER}"
-  if [ "$(id -u)" -eq 0 ]; then
-    chown "${DOS_USER}:${DOS_USER}" "${INSTALL_MARKER}"
-  fi
-}
-
-has_svardos_installation() {
-  if [ -f "${C_DRIVE}/COMMAND.COM" ] || [ -f "${C_DRIVE}/command.com" ]; then
-    return 0
-  fi
-  if [ -d "${C_DRIVE}/SVARDOS/BIN" ] || [ -d "${C_DRIVE}/svardos/bin" ]; then
-    return 0
-  fi
-  return 1
-}
-
-needs_install() {
-  if [ "${DOS_FORCE_INSTALL:-0}" = "1" ]; then
-    return 0
-  fi
-  if [ -f "${INSTALL_MARKER}" ]; then
-    return 1
-  fi
-  if has_svardos_installation; then
-    set_install_marker
-    return 1
-  fi
-  return 0
-}
-
-stage_initial_install() {
+reset_drive_c() {
   if [ ! -d "${SVARDOS_BASE}" ] || [ -z "$(ls -A "${SVARDOS_BASE}")" ]; then
     echo "SvarDOS base directory ${SVARDOS_BASE} is empty. Aborting." >&2
     exit 1
@@ -114,41 +85,6 @@ stage_initial_install() {
   fi
 
   echo "SvarDOS base staged to ${C_DRIVE}"
-}
-
-run_headless_install() {
-  local log_file="${DOSEMU_DIR}/install.log"
-  local comspec=''
-  if [ -f "${C_DRIVE}/CMD.COM" ]; then
-    comspec='C:\CMD.COM'
-  elif [ -f "${C_DRIVE}/COMMAND.COM" ]; then
-    comspec='C:\COMMAND.COM'
-  else
-    echo "SvarDOS provisioning failed: no command interpreter found on ${C_DRIVE}." >&2
-    return 1
-  fi
-  local command="${comspec} /C AUTOEXEC.BAT"
-  local status
-
-  if [ "$(id -u)" -eq 0 ]; then
-    runuser -u "${DOS_USER}" -- dosemu -dumb -K "${C_DRIVE}" -E "${command}" >"${log_file}" 2>&1
-    status=$?
-  else
-    dosemu -dumb -K "${C_DRIVE}" -E "${command}" >"${log_file}" 2>&1
-    status=$?
-  fi
-
-  if [ "${status}" -ne 0 ]; then
-    echo "SvarDOS provisioning failed (dosemu exit ${status}). See ${log_file} for details." >&2
-    return 1
-  fi
-
-  if [ -f "${C_DRIVE}/INSTALL.BAT" ]; then
-    echo "SvarDOS provisioning did not complete successfully (INSTALL.BAT still present). See ${log_file}." >&2
-    return 1
-  fi
-
-  return 0
 }
 
 sync_allowed_content() {
@@ -199,20 +135,18 @@ apply_templates() {
   fi
 }
 
-if needs_install; then
-  stage_initial_install
-  echo "Running initial SvarDOS provisioning..."
-  if run_headless_install; then
-    set_install_marker
-    echo "SvarDOS provisioning complete."
-    echo "Disconnecting. Reconnect via SSH to start the SvarDOS shell."
-    exit 0
-  else
-    exit 1
+detect_dosemu_args
+
+if [ "${DOS_FORCE_INSTALL:-0}" = "1" ] || [ ! -f "${INSTALL_SENTINEL_PATH}" ]; then
+  reset_drive_c
+  touch "${INSTALL_SENTINEL_PATH}"
+  if [ "$(id -u)" -eq 0 ]; then
+    chown "${DOS_USER}:${DOS_USER}" "${INSTALL_SENTINEL_PATH}"
   fi
+else
+  echo "Reusing existing SvarDOS installation on ${C_DRIVE}" >&2
 fi
 
-detect_dosemu_args
 sync_allowed_content
 apply_templates
 

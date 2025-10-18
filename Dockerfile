@@ -5,6 +5,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 # Install base packages and enable the dosemu2 PPA
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
+      software-properties-common \
       gnupg \
       openssh-server \
       busybox-static \
