@@ -188,6 +188,7 @@ docker run … -e ENABLE_TELNET=0 -e DOS_ALLOW_MODE=list -e DOS_AUDIO_MODE=force
 | `dos-shell: muting DOS audio for this session`                       | No PulseAudio/PipeWire endpoint detected when logging in over SSH. Export `DOS_AUDIO_MODE=force` if you need sound.|
 | `ERROR: ladspa: failed to load filter.so / libao: unable to open`    | Happens when audio is muted; harmless once the override is applied.                                                |
 | `Landlock ABI … not defined / landlock_init() failed`                | Older kernels don’t expose `LANDLOCK_ACCESS_FS_REFER`. `dos-shell` disables Landlock automatically.                |
+| `mkdir: cannot create directory '/home/dosuser/.dosemu'`             | Bind-mounted home directory isn’t writable. On Docker, ensure the path is owned by UID/GID 1000. For rootless Podman, keep the compose-provided `selinux: z` volume labels (or add `:z`/`:Z` when running manually) and, if needed, run `podman unshare chown -R 1000:1000 dos_home` so the namespace-mapped UID can write. |
 | `ERROR: using outdated config file ~/.dosemurc`                      | Remove the legacy file (`rm ~/.dosemurc`). `dos-shell` now writes to `~/.dosemu/dosemurc`.                          |
 | `ssh: connect … port 2222: Connection refused`                       | Container not running. `docker compose ps` or `docker compose up -d` to start it.                                   |
 

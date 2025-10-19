@@ -3,7 +3,7 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install base packages and enable the dosemu2 PPA
-RUN apt-get update && apt-get install -y --no-install-recommends software-properties-common gnupg openssh-server busybox-static sudo ca-certificates curl mtools unzip file xauth && add-apt-repository -y ppa:dosemu2/ppa && apt-get install -y --no-install-recommends dosemu2 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends software-properties-common gnupg openssh-server busybox-static sudo ca-certificates curl mtools unzip file xauth acl && add-apt-repository -y ppa:dosemu2/ppa && apt-get install -y --no-install-recommends dosemu2 && rm -rf /var/lib/apt/lists/*
 
 # Provide DOS wrapper, SvarDOS bootstrapper, and service supervisor
 COPY scripts/dos-shell /usr/local/bin/dos-shell

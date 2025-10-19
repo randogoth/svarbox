@@ -1,1 +1,6 @@
 tmp/
+dos_env/*
+!dos_env/README.md
+dos_home/*
+dos_drives/*
+allowed_repo/*

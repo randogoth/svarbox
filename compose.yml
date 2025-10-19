@@ -15,9 +15,9 @@ services:
       TELNET_PORT: ${TELNET_PORT:-23}
       TELNET_LOGIN: /bin/login
     volumes:
-      - ./allowed_repo:/opt/allowed_repo
-      - ./config/dos_allowed:/etc/dos_allowed:ro
-      - ./dos_env:/etc/dos_env
-      - ./dos_home:/home/dosuser
-      - ./dos_drives:/opt/dos_drives
+      - ./allowed_repo:/opt/allowed_repo:z
+      - ./config/dos_allowed:/etc/dos_allowed:ro,z
+      - ./dos_env:/etc/dos_env:z
+      - ./dos_home:/home/dosuser:z
+      - ./dos_drives:/opt/dos_drives:z
     restart: unless-stopped
