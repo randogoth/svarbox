@@ -14,6 +14,7 @@ SVARDOS_BASE="${SVARDOS_BASE:-${SVARDOS_ROOT}/base}"
 ALLOW_MODE="${DOS_ALLOW_MODE:-all}"
 DEFAULT_DOS_USER="dosuser"
 INSTALL_SENTINEL_NAME=".svardos_installed"
+PRE_BOOT_HOOK="${DOS_PRE_BOOT_HOOK:-${ENV_DIR}/pre-boot.sh}"
 
 if [ "$(id -u)" -eq 0 ]; then
   DOS_USER="${DEFAULT_DOS_USER}"
@@ -136,6 +137,37 @@ apply_templates() {
 }
 
 detect_dosemu_args
+
+run_pre_boot_hook() {
+  if [ ! -e "${PRE_BOOT_HOOK}" ]; then
+    return
+  fi
+
+  if [ ! -x "${PRE_BOOT_HOOK}" ]; then
+    echo "dos-shell: pre-boot hook found but not executable: ${PRE_BOOT_HOOK}" >&2
+    return
+  fi
+
+  echo "dos-shell: running pre-boot hook: ${PRE_BOOT_HOOK}" >&2
+  if [ "$(id -u)" -eq 0 ]; then
+    runuser -u "${DOS_USER}" -- env \
+      C_DRIVE="${C_DRIVE}" \
+      DOSEMU_DIR="${DOSEMU_DIR}" \
+      DOS_HOME="${DOS_HOME}" \
+      ALLOWED_REPO="${ALLOWED_REPO}" \
+      SVARDOS_ROOT="${SVARDOS_ROOT}" \
+      SVARDOS_BASE="${SVARDOS_BASE}" \
+      "${PRE_BOOT_HOOK}"
+  else
+    C_DRIVE="${C_DRIVE}" \
+    DOSEMU_DIR="${DOSEMU_DIR}" \
+    DOS_HOME="${DOS_HOME}" \
+    ALLOWED_REPO="${ALLOWED_REPO}" \
+    SVARDOS_ROOT="${SVARDOS_ROOT}" \
+    SVARDOS_BASE="${SVARDOS_BASE}" \
+      "${PRE_BOOT_HOOK}"
+  fi
+}
 
 FORCE_CPU_EMULATION=0
 detect_kvm_support() {
@@ -281,6 +313,7 @@ fi
 
 sync_allowed_content
 apply_templates
+run_pre_boot_hook
 write_autoconfig
 
 if [ "$(id -u)" -eq 0 ]; then

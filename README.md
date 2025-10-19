@@ -74,6 +74,7 @@ All persistent user data inside the guest lives under `/home/dosuser/.dosemu`, w
 - **`allowed_repo/` volume** – drop files here on the host; they are copied into C:\ during login.
 - **`config/dos_allowed`** – list relative paths (from `allowed_repo/`) to permit when `DOS_ALLOW_MODE=list`. With `DOS_ALLOW_MODE=all` every file in the repo is staged.
 - **`dos_env/` templates** – place `AUTOEXEC.BAT` and/or `CONFIG.SYS` to control boot scripts.
+- **Pre-boot hook** – create an executable `dos_env/pre-boot.sh` (or point `DOS_PRE_BOOT_HOOK` at another path). It runs as `dosuser` immediately before dosemu starts, with helper environment variables (`C_DRIVE`, `DOSEMU_DIR`, `ALLOWED_REPO`, `SVARDOS_ROOT`, `SVARDOS_BASE`) so you can copy, delete, or patch files on the DOS drive.
 - **Forcing a reinstall** – set `DOS_FORCE_INSTALL=1` in the environment before logging in; the script re-seeds the drive from `/opt/svardos/base`.
 
 Typical layout when using `docker compose`:
@@ -101,6 +102,7 @@ You can influence runtime behaviour with environment variables. Set them either 
 | `DOS_FORCE_INSTALL`   | `0` (default) or `1`                             | Rebuilds the C: drive from the SvarDOS base on the next login.                                   |
 | `DOS_TERMINAL_MODE`   | `auto`                                            | Determines whether `dosemu` launches with X11 (`-X`), terminal (`-td`) or `-dumb`.               |
 | `DOS_ENV_DIR`         | defaults to `/etc/dos_env`                       | Override if you mount templates somewhere else.                                                  |
+| `DOS_PRE_BOOT_HOOK`   | `${DOS_ENV_DIR}/pre-boot.sh`                     | Custom shell script to run (as `dosuser`) before launching dosemu. Must be executable.           |
 | `SVARDOS_ROOT`/`SVARDOS_BASE` | default `/opt/svardos`                   | Changes where the base image lives (mostly useful during debugging).                             |
 | `AO_DRIVER`           | auto-set to `null` when sound is muted            | You can override to force libao to a specific backend.                                           |
 
