@@ -1,4 +1,4 @@
-# DOS Remote Environment Stack
+# SvarBox 
 
 This repository packages a repeatable SvarDOS environment that can be exposed over SSH (with optional X forwarding) and telnet. It wraps the upstream `dosemu2` emulator with automation for bootstrapping media, distributing pre-approved files, and hardening the guest runtime so multiple users can log in without trampling each other.
 
@@ -22,12 +22,6 @@ The project is split into small, testable shell helpers plus a Docker image that
 
 ## Quick Start
 
-Requirements:
-
-- Linux host with Docker 24+ (`docker compose` plugin included)
-- X11 server on your workstation if you intend to use `ssh -X`
-- Optional: PulseAudio/PipeWire socket forwarded if you want sound
-
 Bring the stack up:
 
 ```sh
@@ -42,18 +36,6 @@ Default access:
 - **Telnet (optional):** `telnet localhost 2323` (disabled if `ENABLE_TELNET=0`)
 
 Use `exit` from the DOS shell to terminate the session; the container keeps running for the next login.
-
-## Repository Layout
-
-| Path                  | Purpose                                                                                          |
-|-----------------------|--------------------------------------------------------------------------------------------------|
-| `Dockerfile`          | Builds the Ubuntu 22.04 based image with dosemu2 and helper scripts.                            |
-| `compose.yml`         | Reference deployment that exposes SSH/Telnet and mounts custom content.                         |
-| `scripts/`            | Automation scripts (`dos-shell`, `prepare-svardos`, `start-services`).                          |
-| `config/`             | Baseline configuration for the container (`sshd_config`, `dos_allowed` allow-list).             |
-| `allowed_repo/`       | Host directory whose contents are copied to `C:\` when permitted.                               |
-| `dos_env/`            | Optional templates for `AUTOEXEC.BAT` / `CONFIG.SYS`; copied on every login.                    |
-| `docs/`               | Room for auxiliary documentation (currently empty).                                             |
 
 All persistent user data inside the guest lives under `/home/dosuser/.dosemu`, which is created on first login.
 
@@ -123,11 +105,11 @@ You can influence runtime behaviour with environment variables. Set them either 
 
 ### Podman / Docker exec entrypoints
 
-`dos-shell` remains the default login shell for `dosuser`, so a plain `podman exec -it dos-env dos-shell` (or `docker exec`) drops you straight into the DOS session. When you need a regular Linux shell in the same running container, reuse the wrapper but append `--linux-shell`:
+`dos-shell` remains the default login shell for `dosuser`, so a plain `podman exec -it svarbox dos-shell` (or `docker exec`) drops you straight into the DOS session. When you need a regular Linux shell in the same running container, reuse the wrapper but append `--linux-shell`:
 
 ```sh
-podman exec -it dos-env dos-shell --linux-shell        # interactive bash as dosuser
-podman exec -it dos-env dos-shell --linux-shell "ls"   # run a single command as dosuser
+podman exec -it svarbox dos-shell --linux-shell        # interactive bash as dosuser
+podman exec -it svarbox dos-shell --linux-shell "ls"   # run a single command as dosuser
 ```
 
 You can override which binary is used for the Linux side by setting `DOS_LINUX_SHELL` (defaults to `/bin/bash`).
@@ -138,8 +120,8 @@ You can override which binary is used for the Linux side by setting `DOS_LINUX_S
 
 | Compose Variable         | Default             | Description                                              |
 |--------------------------|---------------------|----------------------------------------------------------|
-| `DOS_IMAGE_NAME`         | `dos-env`           | Tag assigned to the built image.                         |
-| `DOS_CONTAINER_NAME`     | `dos-env`           | Name of the running container.                           |
+| `DOS_IMAGE_NAME`         | `svarbox`           | Tag assigned to the built image.                         |
+| `DOS_CONTAINER_NAME`     | `svarbox`           | Name of the running container.                           |
 | `DOS_SSH_PORT`           | `2222`              | Host port forwarded to container port 22.                |
 | `DOS_TELNET_PORT`        | `2323`              | Host port forwarded to container port 23.                |
 | `ENABLE_TELNET`          | `1`                 | Toggle BusyBox telnetd.                                  |
@@ -173,7 +155,7 @@ During image build the script also patches `INSTALL.BAT` and `AUTOEXEC.BAT` to w
 If you want to refresh the base files inside a running container:
 
 ```sh
-docker exec -e SVARDOS_REFRESH=1 dos-env /usr/local/bin/prepare-svardos
+docker exec -e SVARDOS_REFRESH=1 svarbox /usr/local/bin/prepare-svardos
 ```
 
 Subsequent logins should pick up the new contents once you also export `DOS_FORCE_INSTALL=1`.
@@ -183,13 +165,13 @@ Subsequent logins should pick up the new contents once you also export `DOS_FORC
 You can launch the container directly:
 
 ```sh
-docker build -t dos-env .
-docker run -d --name dos-env \
+docker build -t svarbox .
+docker run -d --name svarbox \
   -p 2222:22 -p 2323:23 \
   -v "$(pwd)/allowed_repo:/opt/allowed_repo" \
   -v "$(pwd)/config/dos_allowed:/etc/dos_allowed:ro" \
   -v "$(pwd)/dos_env:/etc/dos_env:ro" \
-  dos-env
+  svarbox
 ```
 
 To override behaviour, append `-e` flags:
@@ -217,7 +199,7 @@ Enemy separation: `dos-shell` prints the config overrides it applies; review tho
 - **Upgrading dosemu2/SvarDOS:** rebuild the image (`docker compose build`) after adjusting `Dockerfile` or `SVARDOS_IMG_URL`.
 - **Resetting to stock files:** remove `/home/dosuser/.dosemu` or log in with `DOS_FORCE_INSTALL=1`.
 - **Extending the allow-list:** add entries to `config/dos_allowed` (one per line) or switch the mode to `all`.
-- **Audit logs:** `sshd` is configured to run in debug mode (`-e`); use `docker logs dos-env` for a quick view.
+- **Audit logs:** `sshd` is configured to run in debug mode (`-e`); use `docker logs svarbox` for a quick view.
 
 ## Security Notes
 
@@ -225,7 +207,3 @@ Enemy separation: `dos-shell` prints the config overrides it applies; review tho
 - When audio is muted the script points libao to the `null` backend to avoid opening `/dev/dsp` or Pulse pipes.
 - Landlock sandboxing provides extra filesystem isolation when available. The script downgrades gracefully when the kernel is too old.
 - The default credentials are intentionally simple for local development. Change them (or add public keys) before exposing the service.
-
----
-
-For questions or contributions, open an issue or send a patch – the shell scripts are deliberately compact so it is easy to audit every change.

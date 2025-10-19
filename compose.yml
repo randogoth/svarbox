@@ -4,8 +4,8 @@ services:
       context: .
       args:
         SVARDOS_IMG_URL: ${SVARDOS_IMG_URL:-}
-    image: ${DOS_IMAGE_NAME:-dos-env}
-    container_name: ${DOS_CONTAINER_NAME:-dos-env}
+    image: ${DOS_IMAGE_NAME:-svarbox}
+    container_name: ${DOS_CONTAINER_NAME:-svarbox}
     ports:
       - "${DOS_SSH_PORT:-2222}:22"
       - "${DOS_TELNET_PORT:-2323}:23"
