@@ -1,10 +1,11 @@
 #!/bin/bash
 set -euo pipefail
 
+SVARDOS_BUILD=20250427
 SVARDOS_ROOT="${SVARDOS_ROOT:-/opt/svardos}"
 SVARDOS_BASE_DIR="${SVARDOS_BASE_DIR:-${SVARDOS_ROOT}/base}"
-DEFAULT_URL="http://svardos.org/download/20250427/svardos-20250427-dosemu.zip"
-ARCHIVE_URL="${SVARDOS_IMG_URL:-$DEFAULT_URL}"
+SVARDOS_URL="http://svardos.org/download/${SVARDOS_BUILD}/svardos-${SVARDOS_BUILD}-dosemu.zip"
+ARCHIVE_URL="${SVARDOS_IMG_URL:-$SVARDOS_URL}"
 
 # Skip work if the base tree already exists (unless SVARDOS_REFRESH is set)
 if [ -z "${SVARDOS_REFRESH:-}" ] && [ -e "${SVARDOS_BASE_DIR}/COMMAND.COM" ]; then
