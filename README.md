@@ -75,6 +75,7 @@ All persistent user data inside the guest lives under `/home/dosuser/.dosemu`, w
 - **`config/dos_allowed`** – list relative paths (from `allowed_repo/`) to permit when `DOS_ALLOW_MODE=list`. With `DOS_ALLOW_MODE=all` every file in the repo is staged.
 - **`dos_env/` templates** – place `AUTOEXEC.BAT` and/or `CONFIG.SYS` to control boot scripts.
 - **`dos_home/` volume** – bind-mounted to `/home/dosuser`; persists the DOS user profile, `.dosemu` state, SSH keys, etc.
+- **`dos_drives/` volume** – subdirectories named after drive letters (e.g. `F`, `G`) are exposed to DOS as additional drives. Letters `C`, `D`, and `E` are reserved by default (see `DOS_RESERVED_DRIVES` below); set that variable if you want to repurpose them.
 - **Pre-boot hook** – create an executable `dos_env/pre-boot.sh` (or point `DOS_PRE_BOOT_HOOK` at another path). It runs as `dosuser` immediately before dosemu starts, with helper environment variables (`C_DRIVE`, `DOSEMU_DIR`, `ALLOWED_REPO`, `SVARDOS_ROOT`, `SVARDOS_BASE`) so you can copy, delete, or patch files on the DOS drive.
 - **Forcing a reinstall** – set `DOS_FORCE_INSTALL=1` in the environment before logging in; the script re-seeds the drive from `/opt/svardos/base`.
 
@@ -88,6 +89,10 @@ allowed_repo/
 dos_home/
   .ssh/
     authorized_keys
+dos_drives/
+  F/
+    demos/
+      intro.exe
 dos_env/
   AUTOEXEC.BAT
   CONFIG.SYS
@@ -107,6 +112,10 @@ You can influence runtime behaviour with environment variables. Set them either 
 | `DOS_TERMINAL_MODE`   | `auto`                                            | Determines whether `dosemu` launches with X11 (`-X`), terminal (`-td`) or `-dumb`.               |
 | `DOS_ENV_DIR`         | defaults to `/etc/dos_env`                       | Override if you mount templates somewhere else.                                                  |
 | `DOS_PRE_BOOT_HOOK`   | `${DOS_ENV_DIR}/pre-boot.sh`                     | Custom shell script to run (as `dosuser`) before launching dosemu. Must be executable.           |
+| `DOS_EXTRA_DRIVE_ROOT` | `/opt/dos_drives`                               | Override where `dos-shell` looks for extra drive directories (one per drive letter).             |
+| `DOS_RESERVED_DRIVES` | `CDE`                                            | Letters to leave untouched when mapping extra drives (remove or change to claim `D:`/`E:` etc.). |
+| `DOS_ALLOWED_REPO`    | `/opt/allowed_repo`                              | Alternate root for the allowed-repo staging area (useful in tests or custom mounts).             |
+| `DOS_ALLOWED_LIST`    | `/etc/dos_allowed`                               | Path to the allowlist file consumed when `DOS_ALLOW_MODE=list`.                                  |
 | `SVARDOS_ROOT`/`SVARDOS_BASE` | default `/opt/svardos`                   | Changes where the base image lives (mostly useful during debugging).                             |
 | `AO_DRIVER`           | auto-set to `null` when sound is muted            | You can override to force libao to a specific backend.                                           |
 

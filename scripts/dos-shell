@@ -4,8 +4,10 @@
 
 set -euo pipefail
 
-ALLOWED_LIST="/etc/dos_allowed"
-ALLOWED_REPO="/opt/allowed_repo"
+ALLOWED_LIST="${DOS_ALLOWED_LIST:-/etc/dos_allowed}"
+ALLOWED_REPO="${DOS_ALLOWED_REPO:-/opt/allowed_repo}"
+EXTRA_DRIVE_ROOT="${DOS_EXTRA_DRIVE_ROOT:-/opt/dos_drives}"
+RESERVED_DRIVES_RAW="${DOS_RESERVED_DRIVES:-CDE}"
 ENV_DIR="/etc/dos_env"
 AUTOEXEC_TEMPLATE="${ENV_DIR}/AUTOEXEC.BAT"
 CONFIG_TEMPLATE="${ENV_DIR}/CONFIG.SYS"
@@ -113,6 +115,8 @@ detect_dosemu_args() {
   esac
 }
 allowed_entries=()
+extra_drive_logs=()
+declare -A reserved_letters=()
 
 mkdir -p "${DOSEMU_DIR}" "${C_DRIVE}"
 if [ "$(id -u)" -eq 0 ] && [ ! -d "${ENV_DIR}" ]; then
@@ -139,6 +143,19 @@ reset_drive_c() {
 
   echo "SvarDOS base staged to ${C_DRIVE}"
 }
+
+normalise_reserved_drives() {
+  local raw="$1"
+  local cleaned="${raw//[^[:alpha:]]/}"
+  local i letter
+  for ((i=0; i<${#cleaned}; i++)); do
+    letter="${cleaned:i:1}"
+    letter="${letter,,}"
+    reserved_letters["${letter}"]=1
+  done
+}
+
+normalise_reserved_drives "${RESERVED_DRIVES_RAW}"
 
 sync_allowed_content() {
   allowed_entries=()
@@ -177,6 +194,70 @@ sync_allowed_content() {
       echo "Warning: allowed file not found: $src" >&2
     fi
   done
+}
+
+sync_extra_drives() {
+  extra_drive_logs=()
+  local root="${EXTRA_DRIVE_ROOT}"
+  local -A seen_letters=()
+
+  if [ -d "${root}" ]; then
+    shopt -s nullglob
+    local entry base letter letter_lower letter_upper dest
+    for entry in "${root}"/*; do
+      if [ ! -d "$entry" ]; then
+        continue
+      fi
+      base="$(basename "$entry")"
+      case "$base" in
+        [A-Za-z]|[A-Za-z]:)
+          letter="${base:0:1}"
+          ;;
+        *)
+          continue
+          ;;
+      esac
+      letter_lower="${letter,,}"
+      letter_upper="${letter^^}"
+      if [ -n "${reserved_letters[${letter_lower}]+x}" ]; then
+        echo "dos-shell: skipping extra drive '${base}' (${letter_upper}: is reserved)" >&2
+        continue
+      fi
+      dest="${DOSEMU_DIR}/drive_${letter_lower}"
+      if [ -e "${dest}" ] && [ ! -L "${dest}" ]; then
+        echo "dos-shell: cannot map ${letter_upper}: - ${dest} already exists and is not a symlink" >&2
+        continue
+      fi
+      if ! ln -sfn "$entry" "$dest"; then
+        echo "dos-shell: failed to link ${letter_upper}: to ${entry}" >&2
+        continue
+      fi
+      seen_letters["${letter_lower}"]=1
+      extra_drive_logs+=("${letter_upper}: ${entry}")
+    done
+    shopt -u nullglob
+  fi
+
+  shopt -s nullglob
+  local link base letter target
+  for link in "${DOSEMU_DIR}"/drive_[[:lower:]]; do
+    [ -L "$link" ] || continue
+    base="$(basename "$link")"
+    letter="${base#drive_}"
+    if [ -z "$letter" ] || [ "$letter" = "c" ]; then
+      continue
+    fi
+    if [ -n "${seen_letters[$letter]+x}" ]; then
+      continue
+    fi
+    target="$(readlink "$link")"
+    case "$target" in
+      "${EXTRA_DRIVE_ROOT}"/*)
+        rm -f "$link"
+        ;;
+    esac
+  done
+  shopt -u nullglob
 }
 
 apply_templates() {
@@ -364,6 +445,7 @@ else
 fi
 
 sync_allowed_content
+sync_extra_drives
 apply_templates
 run_pre_boot_hook
 write_autoconfig
@@ -378,6 +460,13 @@ elif [ "${#allowed_entries[@]}" -gt 0 ]; then
   echo "Allowlisted files copied to C: from ${ALLOWED_REPO}:"
   for entry in "${allowed_entries[@]}"; do
     echo "  ${entry}"
+  done
+fi
+
+if [ "${#extra_drive_logs[@]}" -gt 0 ]; then
+  echo "Additional DOS drives mapped:"
+  for mapping in "${extra_drive_logs[@]}"; do
+    echo "  ${mapping}"
   done
 fi
 

@@ -36,9 +36,9 @@ RUN useradd -m -s /usr/local/bin/dos-shell dosuser && \
     mkdir -p /home/dosuser/.ssh && chown -R dosuser:dosuser /home/dosuser && \
     echo "dosuser:dosuser" | chpasswd
 
-# Create directories for allowed DOS files and the C: drive mount
-RUN mkdir -p /opt/allowed_repo /cdrive /etc/dos_env /opt/svardos && \
-    chown -R dosuser:dosuser /opt/allowed_repo /cdrive
+# Create directories for allowed DOS files, extra drives, and the C: drive mount
+RUN mkdir -p /opt/allowed_repo /opt/dos_drives /cdrive /etc/dos_env /opt/svardos && \
+    chown -R dosuser:dosuser /opt/allowed_repo /opt/dos_drives /cdrive
 
 # Download and stage SvarDOS base files
 ARG SVARDOS_IMG_URL
