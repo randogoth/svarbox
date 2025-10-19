@@ -74,6 +74,7 @@ All persistent user data inside the guest lives under `/home/dosuser/.dosemu`, w
 - **`allowed_repo/` volume** – drop files here on the host; they are copied into C:\ during login.
 - **`config/dos_allowed`** – list relative paths (from `allowed_repo/`) to permit when `DOS_ALLOW_MODE=list`. With `DOS_ALLOW_MODE=all` every file in the repo is staged.
 - **`dos_env/` templates** – place `AUTOEXEC.BAT` and/or `CONFIG.SYS` to control boot scripts.
+- **`dos_home/` volume** – bind-mounted to `/home/dosuser`; persists the DOS user profile, `.dosemu` state, SSH keys, etc.
 - **Pre-boot hook** – create an executable `dos_env/pre-boot.sh` (or point `DOS_PRE_BOOT_HOOK` at another path). It runs as `dosuser` immediately before dosemu starts, with helper environment variables (`C_DRIVE`, `DOSEMU_DIR`, `ALLOWED_REPO`, `SVARDOS_ROOT`, `SVARDOS_BASE`) so you can copy, delete, or patch files on the DOS drive.
 - **Forcing a reinstall** – set `DOS_FORCE_INSTALL=1` in the environment before logging in; the script re-seeds the drive from `/opt/svardos/base`.
 
@@ -84,6 +85,9 @@ allowed_repo/
   games/
     doom/
       doom.exe
+dos_home/
+  .ssh/
+    authorized_keys
 dos_env/
   AUTOEXEC.BAT
   CONFIG.SYS

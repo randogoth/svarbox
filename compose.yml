@@ -18,4 +18,5 @@ services:
       - ./allowed_repo:/opt/allowed_repo
       - ./config/dos_allowed:/etc/dos_allowed:ro
       - ./dos_env:/etc/dos_env
+      - ./dos_home:/home/dosuser
     restart: unless-stopped
