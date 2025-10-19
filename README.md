@@ -108,6 +108,17 @@ You can influence runtime behaviour with environment variables. Set them either 
 
 `dos-shell` also writes a managed `~/.dosemu/dosemurc` (marked with `# Managed by dos-shell…`) when it needs to enforce CPU or audio fallbacks. Delete the file to restore defaults; it is regenerated on demand.
 
+### Podman / Docker exec entrypoints
+
+`dos-shell` remains the default login shell for `dosuser`, so a plain `podman exec -it dos-env dos-shell` (or `docker exec`) drops you straight into the DOS session. When you need a regular Linux shell in the same running container, reuse the wrapper but append `--linux-shell`:
+
+```sh
+podman exec -it dos-env dos-shell --linux-shell        # interactive bash as dosuser
+podman exec -it dos-env dos-shell --linux-shell "ls"   # run a single command as dosuser
+```
+
+You can override which binary is used for the Linux side by setting `DOS_LINUX_SHELL` (defaults to `/bin/bash`).
+
 ## Environment Variables (Container / Compose)
 
 `compose.yml` exposes a few knobs. You can drop a `.env` file next to it to override the defaults.

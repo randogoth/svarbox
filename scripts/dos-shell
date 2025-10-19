@@ -15,6 +15,7 @@ ALLOW_MODE="${DOS_ALLOW_MODE:-all}"
 DEFAULT_DOS_USER="dosuser"
 INSTALL_SENTINEL_NAME=".svardos_installed"
 PRE_BOOT_HOOK="${DOS_PRE_BOOT_HOOK:-${ENV_DIR}/pre-boot.sh}"
+LINUX_SHELL="${DOS_LINUX_SHELL:-/bin/bash}"
 
 if [ "$(id -u)" -eq 0 ]; then
   DOS_USER="${DEFAULT_DOS_USER}"
@@ -27,6 +28,57 @@ fi
 if [ -z "${DOS_HOME}" ]; then
   echo "Unable to determine home directory for ${DOS_USER}" >&2
   exit 1
+fi
+
+shell_passthrough=0
+shell_payload=""
+
+if [ "${1:-}" = "--help" ]; then
+  cat <<'EOF'
+Usage: dos-shell [--linux-shell [command]]
+
+Default invocation boots the DOS environment via dosemu.
+Use --linux-shell to open the underlying Linux shell instead.
+EOF
+  exit 0
+fi
+
+if [ "${1:-}" = "--linux-shell" ]; then
+  shift
+  shell_passthrough=1
+  if [ $# -gt 0 ]; then
+    shell_payload="$*"
+  fi
+fi
+
+if [ "${shell_passthrough}" -eq 0 ] && [ -n "${SSH_ORIGINAL_COMMAND:-}" ]; then
+  case "${SSH_ORIGINAL_COMMAND}" in
+    linux-shell)
+      shell_passthrough=1
+      shell_payload=""
+      ;;
+    linux-shell[[:space:]]*)
+      shell_passthrough=1
+      shell_payload="${SSH_ORIGINAL_COMMAND#linux-shell}"
+      shell_payload="${shell_payload#"${shell_payload%%[![:space:]]*}"}"
+      ;;
+  esac
+fi
+
+if [ "${shell_passthrough}" -eq 1 ]; then
+  if [ "$(id -u)" -eq 0 ]; then
+    if [ -n "${shell_payload}" ]; then
+      exec runuser -u "${DOS_USER}" -- "${LINUX_SHELL}" -lc "${shell_payload}"
+    else
+      exec runuser -u "${DOS_USER}" -- "${LINUX_SHELL}" -l
+    fi
+  else
+    if [ -n "${shell_payload}" ]; then
+      exec "${LINUX_SHELL}" -lc "${shell_payload}"
+    else
+      exec "${LINUX_SHELL}" -l
+    fi
+  fi
 fi
 
 DOSEMU_DIR="${DOS_HOME}/.dosemu"
