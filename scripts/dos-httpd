@@ -66,12 +66,12 @@ HTML_PAGE = """<!DOCTYPE html>
     }
     #terminal {
       display: inline-flex;
-      background: #000;
+      background: rgb(12 12 12);
       border: 1px solid #2b2b2b;
       box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
       padding: 12px;
-      transform-origin: top center;
-      transform: scaleY(1.2);
+      transform-origin: center center;
+      position: relative;
       box-sizing: content-box;
     }
     #terminal .xterm {
@@ -90,6 +90,9 @@ HTML_PAGE = """<!DOCTYPE html>
       height: 400px !important;
       padding: 0 !important;
     }
+    .xterm-dom-renderer-owner-1 .xterm-bg-0 {
+      background-color: rgb(14 14 14) !important;
+    }
   </style>
 </head>
 <body>
@@ -107,6 +110,7 @@ HTML_PAGE = """<!DOCTYPE html>
       const CHAR_HEIGHT = 16;
       const VIEWPORT_WIDTH = 640;
       const VIEWPORT_HEIGHT = 400;
+      const BASE_VERTICAL_STRETCH = 1.2;
       const TARGET_ROW_HEIGHT = VIEWPORT_HEIGHT / ROWS;
 
       const terminalHost = document.getElementById("terminal");
@@ -162,6 +166,22 @@ HTML_PAGE = """<!DOCTYPE html>
         }
       }
 
+      function updateScale() {
+        const maxWidth = window.innerWidth * 0.85;
+        const maxHeight = window.innerHeight * 0.85;
+
+        // reset transform to measure base stretched size
+        terminalHost.style.transform = `scaleY(${BASE_VERTICAL_STRETCH})`;
+        terminalHost.style.transformOrigin = "center center";
+
+        const rect = terminalHost.getBoundingClientRect();
+        const scaleForWidth = maxWidth / rect.width;
+        const scaleForHeight = maxHeight / rect.height;
+        const uniformScale = Math.min(scaleForWidth, scaleForHeight);
+
+        terminalHost.style.transform = `scale(${uniformScale}) scaleY(${BASE_VERTICAL_STRETCH})`;
+      }
+
       await waitForDosvgaFont();
 
       const term = new Terminal({
@@ -181,6 +201,7 @@ HTML_PAGE = """<!DOCTYPE html>
       term.open(terminalHost);
       term.resize(COLS, ROWS);
       applyViewportClamp();
+      updateScale();
 
       const wsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
       const socket = new WebSocket(`${wsProtocol}://${window.location.host}/ws`);
@@ -199,6 +220,7 @@ HTML_PAGE = """<!DOCTYPE html>
         socket.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
         term.focus();
         applyViewportClamp();
+        updateScale();
       });
 
       socket.addEventListener("message", (event) => {
@@ -230,13 +252,18 @@ HTML_PAGE = """<!DOCTYPE html>
       term.onResize(({ cols, rows }) => {
         socket.send(JSON.stringify({ type: "resize", cols, rows }));
         applyViewportClamp();
+        updateScale();
       });
 
       term.onRender(() => {
         applyViewportClamp();
+        updateScale();
       });
 
-      window.addEventListener("resize", () => applyViewportClamp(), { passive: true });
+      window.addEventListener("resize", () => {
+        applyViewportClamp();
+        updateScale();
+      }, { passive: true });
     })();
   </script>
 </body>
