@@ -126,7 +126,7 @@ You can override which binary is used for the Linux side by setting `DOS_LINUX_S
 | `DOS_SSH_PORT`           | `2222`              | Host port forwarded to container port 22.                |
 | `DOS_TELNET_PORT`        | `2323`              | Host port forwarded to container port 23.                |
 | `DOS_HTTP_PORT`          | `8080`              | Host port forwarded to the web console.                  |
-| `DOS_HTTP_FONT_PATH`     | `/usr/local/share/dos-httpd/WebPlus_IBM_VGA_8x16.woff` | Override the font served to the web console.             |
+| `DOS_HTTP_CRT`           | `1`                 | Toggle the CRT styling applied to the web console (`0` to disable). |
 | `ENABLE_TELNET`          | `1`                 | Toggle BusyBox telnetd.                                  |
 | `ENABLE_HTTP_CONSOLE`    | `1`                 | Launch the built-in web terminal.                        |
 | `TELNET_PORT`            | `23`                | Port inside the container where telnetd listens.         |

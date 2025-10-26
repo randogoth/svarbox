@@ -113,8 +113,15 @@ start_http_console() {
   if [ -n "${DOS_HTTP_LOG_LEVEL:-}" ]; then
     args+=(--log-level "${DOS_HTTP_LOG_LEVEL}")
   fi
-  if [ -n "${DOS_HTTP_FONT_PATH:-}" ]; then
-    args+=(--font-path "${DOS_HTTP_FONT_PATH}")
+  if [ -n "${DOS_HTTP_CRT:-}" ]; then
+    case "${DOS_HTTP_CRT,,}" in
+      0|false|no|off)
+        args+=(--no-crt)
+        ;;
+      1|true|yes|on)
+        args+=(--crt)
+        ;;
+    esac
   fi
 
   set +e

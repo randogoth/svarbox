@@ -28,6 +28,18 @@ from aiohttp import web, WSMsgType
 
 LOG = logging.getLogger("dos_httpd")
 
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    value = value.strip().lower()
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    return default
+
 HTML_PAGE = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -76,7 +88,7 @@ HTML_PAGE = """<!DOCTYPE html>
       overflow: hidden;
     }
     .crt-display {
-      filter: saturate(1.1) contrast(1.12) brightness(0.85);
+      filter: saturate(1.05) contrast(1.08) brightness(0.95);
       --crt-line-step: 1;
     }
     .crt-display::before {
@@ -87,15 +99,15 @@ HTML_PAGE = """<!DOCTYPE html>
       background-image:
         repeating-linear-gradient(
           to bottom,
-          rgba(255, 255, 255, 0.1) 0px,
-          rgba(255, 255, 255, 0.1) calc(var(--crt-line-step) * 1px),
+          rgba(255, 255, 255, 0.06) 0px,
+          rgba(255, 255, 255, 0.06) calc(var(--crt-line-step) * 1px),
           rgba(0, 0, 0, 0) calc(var(--crt-line-step) * 1px),
           rgba(0, 0, 0, 0) calc(var(--crt-line-step) * 2px)
         ),
         repeating-linear-gradient(
           to right,
-          rgba(255, 255, 255, 0.04) 0px,
-          rgba(255, 255, 255, 0.04) calc(var(--crt-line-step) * 1px),
+          rgba(255, 255, 255, 0.025) 0px,
+          rgba(255, 255, 255, 0.025) calc(var(--crt-line-step) * 1px),
           rgba(0, 0, 0, 0) calc(var(--crt-line-step) * 1px),
           rgba(0, 0, 0, 0) calc(var(--crt-line-step) * 2px)
         );
@@ -152,6 +164,7 @@ HTML_PAGE = """<!DOCTYPE html>
 
   <script type="module">
     import { Terminal } from "https://cdn.jsdelivr.net/npm/xterm@5.3.0/+esm";
+    const CRT_ENABLED = __CRT_ENABLED__;
 
     (async () => {
       const COLS = 80;
@@ -159,10 +172,15 @@ HTML_PAGE = """<!DOCTYPE html>
       const CHAR_HEIGHT = 16;
       const VIEWPORT_WIDTH = 640;
       const VIEWPORT_HEIGHT = 400;
-      const BASE_VERTICAL_STRETCH = 1.2;
+      const BASE_VERTICAL_STRETCH = CRT_ENABLED ? 1.2 : 1;
       const TARGET_ROW_HEIGHT = VIEWPORT_HEIGHT / ROWS;
 
       const terminalHost = document.getElementById("terminal");
+      if (CRT_ENABLED) {
+        terminalHost.classList.add("crt-display");
+      } else {
+        terminalHost.classList.remove("crt-display");
+      }
 
       async function waitForDosvgaFont() {
         if (!document.fonts || typeof document.fonts.load !== "function") {
@@ -200,7 +218,6 @@ HTML_PAGE = """<!DOCTYPE html>
         if (screen) {
           screen.style.width = `${VIEWPORT_WIDTH}px`;
           screen.style.height = `${VIEWPORT_HEIGHT}px`;
-          screen.classList.add("crt-display");
         }
 
         const rows = terminalHost.querySelector(".xterm-rows");
@@ -228,8 +245,11 @@ HTML_PAGE = """<!DOCTYPE html>
         const scaleForWidth = maxWidth / rect.width;
         const scaleForHeight = maxHeight / rect.height;
         const uniformScale = Math.min(scaleForWidth, scaleForHeight);
-
-        terminalHost.style.setProperty('--crt-line-step', (1 / uniformScale).toString());
+        if (CRT_ENABLED) {
+          terminalHost.style.setProperty('--crt-line-step', (1 / uniformScale).toString());
+        } else {
+          terminalHost.style.removeProperty('--crt-line-step');
+        }
         terminalHost.style.transform = `scale(${uniformScale}) scaleY(${BASE_VERTICAL_STRETCH})`;
       }
 
@@ -490,7 +510,9 @@ class ShellSession:
 
 
 async def index_handler(_request: web.Request) -> web.StreamResponse:
-    return web.Response(text=HTML_PAGE, content_type="text/html", headers={"Cache-Control": "no-store"})
+    cfg: "AppConfig" = _request.app["config"]
+    page = HTML_PAGE.replace("__CRT_ENABLED__", "true" if cfg.crt_effect else "false")
+    return web.Response(text=page, content_type="text/html", headers={"Cache-Control": "no-store"})
 
 
 async def health_handler(_request: web.Request) -> web.Response:
@@ -499,7 +521,7 @@ async def health_handler(_request: web.Request) -> web.Response:
 
 async def font_handler(request: web.Request) -> web.StreamResponse:
     cfg: "AppConfig" = request.app["config"]
-    if not cfg.font_path or not os.path.exists(cfg.font_path):
+    if not os.path.exists(cfg.font_path):
         raise web.HTTPNotFound()
     return web.FileResponse(path=cfg.font_path, headers={"Cache-Control": "public, max-age=86400"})
 
@@ -536,14 +558,17 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
 
 
 class AppConfig:
-    def __init__(self, user: str, shell_path: str, host: str, port: int, rows: int, cols: int, font_path: Optional[str]):
+    FONT_PATH = "/usr/local/share/dos-httpd/WebPlus_IBM_VGA_8x16.woff"
+
+    def __init__(self, user: str, shell_path: str, host: str, port: int, rows: int, cols: int, crt_effect: bool):
         self.user = user
         self.shell_path = shell_path
         self.host = host
         self.port = port
         self.default_rows = rows
         self.default_cols = cols
-        self.font_path = font_path
+        self.font_path = self.FONT_PATH
+        self.crt_effect = crt_effect
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
@@ -568,11 +593,10 @@ def build_argument_parser() -> argparse.ArgumentParser:
         choices=["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"],
         help="Log verbosity",
     )
-    parser.add_argument(
-        "--font-path",
-        default=os.environ.get("DOS_HTTP_FONT_PATH", "/usr/local/share/dos-httpd/WebPlus_IBM_VGA_8x16.woff"),
-        help="Path to the WOFF font used by the terminal UI",
-    )
+    default_crt = _env_bool("DOS_HTTP_CRT", True)
+    parser.set_defaults(crt_effect=default_crt)
+    parser.add_argument("--crt", dest="crt_effect", action="store_true", help="Enable CRT overlay")
+    parser.add_argument("--no-crt", dest="crt_effect", action="store_false", help="Disable CRT overlay")
     return parser
 
 
@@ -606,7 +630,7 @@ def main() -> None:
         port=args.port,
         rows=args.rows,
         cols=args.cols,
-        font_path=args.font_path if args.font_path else None,
+        crt_effect=args.crt_effect,
     )
 
     app = asyncio.run(create_app(cfg))
