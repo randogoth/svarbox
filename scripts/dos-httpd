@@ -70,31 +70,23 @@ HTML_PAGE = """<!DOCTYPE html>
       border: 1px solid #2b2b2b;
       box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
       padding: 12px;
-      width: auto;
-      height: auto;
       box-sizing: content-box;
     }
     #terminal .xterm {
-      width: auto !important;
-      height: auto !important;
-    }
-    #terminal .xterm-viewport {
-      background-color: #000 !important;
-      overflow: hidden !important;
-      width: auto !important;
-    }
-    #terminal .xterm-rows,
-    #terminal .xterm-scroll-area {
-      width: auto !important;
-      height: auto !important;
-    }
-    #terminal .xterm-screen {
-      width: auto !important;
-      height: auto !important;
+      width: 100% !important;
+      height: 100% !important;
     }
     #terminal .xterm .xterm-helper-textarea {
       width: 0 !important;
       height: 0 !important;
+    }
+    #terminal .xterm-viewport,
+    #terminal .xterm-screen,
+    #terminal .xterm-rows,
+    #terminal .xterm-scroll-area {
+      width: 640px !important;
+      height: 400px !important;
+      padding: 0 !important;
     }
   </style>
 </head>
@@ -107,69 +99,144 @@ HTML_PAGE = """<!DOCTYPE html>
   <script type="module">
     import { Terminal } from "https://cdn.jsdelivr.net/npm/xterm@5.3.0/+esm";
 
-    const INITIAL_COLS = 80;
-    const INITIAL_ROWS = 25;
-    const term = new Terminal({
-      cursorBlink: true,
-      convertEol: true,
-      fontFamily: "DOSVGA, Fira Code, Cascadia Mono, Hack, monospace",
-      fontSize: 16,
-      cols: INITIAL_COLS,
-      rows: INITIAL_ROWS,
-      theme: {
-        background: "#000000",
-        foreground: "#f5f5f5"
-      },
-    });
-    term.open(document.getElementById("terminal"));
+    (async () => {
+      const COLS = 80;
+      const ROWS = 25;
+      const CHAR_HEIGHT = 16;
+      const VIEWPORT_WIDTH = 640;
+      const VIEWPORT_HEIGHT = 400;
+      const TARGET_ROW_HEIGHT = VIEWPORT_HEIGHT / ROWS;
 
-    const wsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const socket = new WebSocket(`${wsProtocol}://${window.location.host}/ws`);
-    const textDecoder = new TextDecoder("utf-8", { fatal: false });
+      const terminalHost = document.getElementById("terminal");
 
-    function decodeBase64ToString(b64) {
-      const binary = atob(b64);
-      const bytes = new Uint8Array(binary.length);
-      for (let i = 0; i < binary.length; i += 1) {
-        bytes[i] = binary.charCodeAt(i);
-      }
-      return textDecoder.decode(bytes);
-    }
-
-    socket.addEventListener("open", () => {
-      socket.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
-      term.focus();
-    });
-
-    socket.addEventListener("message", (event) => {
-      try {
-        const payload = JSON.parse(event.data);
-        if (payload.type === "output") {
-          term.write(decodeBase64ToString(payload.data));
-        } else if (payload.type === "exit") {
-          term.write("\\r\\n[dos-shell exited]\\r\\n");
+      async function waitForDosvgaFont() {
+        if (!document.fonts || typeof document.fonts.load !== "function") {
+          return;
         }
-      } catch (err) {
-        console.error("failed to process message", err);
+
+        try {
+          await Promise.race([
+            document.fonts.load(`${CHAR_HEIGHT}px "DOSVGA"`),
+            new Promise((resolve) => setTimeout(resolve, 2000)),
+          ]);
+        } catch (err) {
+          console.debug("DOSVGA font load race rejected", err);
+        }
       }
-    });
 
-    socket.addEventListener("close", (event) => {
-      term.write(`\\r\\n[connection closed: ${event.code}]\\r\\n`);
-    });
+      function applyViewportClamp() {
+        terminalHost.style.width = `${VIEWPORT_WIDTH}px`;
+        terminalHost.style.height = `${VIEWPORT_HEIGHT}px`;
 
-    socket.addEventListener("error", (event) => {
-      console.error("websocket error", event);
-      term.write("\\r\\n[websocket error]\\r\\n");
-    });
+        const viewport = terminalHost.querySelector(".xterm-viewport");
+        if (viewport) {
+          viewport.style.width = `${VIEWPORT_WIDTH}px`;
+          viewport.style.height = `${VIEWPORT_HEIGHT}px`;
+          viewport.style.overflow = "hidden";
+        }
 
-    term.onData((data) => {
-      socket.send(JSON.stringify({ type: "input", data }));
-    });
+        const scrollArea = terminalHost.querySelector(".xterm-scroll-area");
+        if (scrollArea) {
+          scrollArea.style.width = `${VIEWPORT_WIDTH}px`;
+          scrollArea.style.height = `${VIEWPORT_HEIGHT}px`;
+        }
 
-    term.onResize(({ cols, rows }) => {
-      socket.send(JSON.stringify({ type: "resize", cols, rows }));
-    });
+        const screen = terminalHost.querySelector(".xterm-screen");
+        if (screen) {
+          screen.style.width = `${VIEWPORT_WIDTH}px`;
+          screen.style.height = `${VIEWPORT_HEIGHT}px`;
+        }
+
+        const rows = terminalHost.querySelector(".xterm-rows");
+        if (rows) {
+          rows.style.width = `${VIEWPORT_WIDTH}px`;
+          rows.style.height = `${VIEWPORT_HEIGHT}px`;
+          const rowDivs = rows.querySelectorAll("div");
+          rowDivs.forEach((div) => {
+            div.style.height = `${TARGET_ROW_HEIGHT}px`;
+            div.style.lineHeight = `${TARGET_ROW_HEIGHT}px`;
+            div.style.width = `${VIEWPORT_WIDTH}px`;
+          });
+        }
+      }
+
+      await waitForDosvgaFont();
+
+      const term = new Terminal({
+        rendererType: "canvas",
+        cursorBlink: true,
+        convertEol: true,
+        fontFamily: "DOSVGA, Fira Code, Cascadia Mono, Hack, monospace",
+        fontSize: CHAR_HEIGHT,
+        lineHeight: 1,
+        cols: COLS,
+        rows: ROWS,
+        theme: {
+          background: "#000000",
+          foreground: "#f5f5f5"
+        },
+      });
+
+      term.open(terminalHost);
+      term.resize(COLS, ROWS);
+      applyViewportClamp();
+
+      const wsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
+      const socket = new WebSocket(`${wsProtocol}://${window.location.host}/ws`);
+      const textDecoder = new TextDecoder("utf-8", { fatal: false });
+
+      function decodeBase64ToString(b64) {
+        const binary = atob(b64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i += 1) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        return textDecoder.decode(bytes);
+      }
+
+      socket.addEventListener("open", () => {
+        socket.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+        term.focus();
+        applyViewportClamp();
+      });
+
+      socket.addEventListener("message", (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload.type === "output") {
+            term.write(decodeBase64ToString(payload.data));
+          } else if (payload.type === "exit") {
+            term.write("\\r\\n[dos-shell exited]\\r\\n");
+          }
+        } catch (err) {
+          console.error("failed to process message", err);
+        }
+      });
+
+      socket.addEventListener("close", (event) => {
+        term.write(`\\r\\n[connection closed: ${event.code}]\\r\\n`);
+      });
+
+      socket.addEventListener("error", (event) => {
+        console.error("websocket error", event);
+        term.write("\\r\\n[websocket error]\\r\\n");
+      });
+
+      term.onData((data) => {
+        socket.send(JSON.stringify({ type: "input", data }));
+      });
+
+      term.onResize(({ cols, rows }) => {
+        socket.send(JSON.stringify({ type: "resize", cols, rows }));
+        applyViewportClamp();
+      });
+
+      term.onRender(() => {
+        applyViewportClamp();
+      });
+
+      window.addEventListener("resize", () => applyViewportClamp(), { passive: true });
+    })();
   </script>
 </body>
 </html>
