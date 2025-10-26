@@ -1,0 +1,421 @@
+#!/usr/bin/env python3
+"""
+Serve a lightweight web console backed by /usr/local/bin/dos-shell.
+
+The server exposes:
+  - GET  /      → Single-page app with an xterm.js terminal
+  - GET  /ws    → WebSocket endpoint that proxies a PTY attached to dos-shell
+  - GET  /healthz → Basic readiness probe
+"""
+
+import argparse
+import asyncio
+import base64
+import errno
+import fcntl
+import json
+import logging
+import os
+import pty
+import pwd
+import signal
+import struct
+import termios
+from typing import Dict, Optional, Tuple
+
+from aiohttp import web, WSMsgType
+
+
+LOG = logging.getLogger("dos_httpd")
+
+HTML_PAGE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>SvarBox Web Console</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+  <style>
+    :root, body { background: #1e1e1e; color: #f0f0f0; height: 100%; }
+    body {
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      font-family: system-ui, sans-serif;
+    }
+    header {
+      padding: 0.6rem 1rem;
+      background: #111;
+      font-size: 0.95rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    #terminal {
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+    #terminal .xterm-viewport {
+      background-color: #000;
+    }
+  </style>
+</head>
+<body>
+  <header>SvarBox DOS Console</header>
+  <div id="terminal"></div>
+
+  <script type="module">
+    import { Terminal } from "https://cdn.jsdelivr.net/npm/xterm@5.3.0/+esm";
+    import { FitAddon } from "https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/+esm";
+
+    const term = new Terminal({
+      cursorBlink: true,
+      convertEol: true,
+      theme: {
+        background: "#000000",
+        foreground: "#f5f5f5"
+      },
+    });
+    const fitAddon = new FitAddon();
+
+    term.loadAddon(fitAddon);
+    term.open(document.getElementById("terminal"));
+
+    function fitLater() {
+      requestAnimationFrame(() => fitAddon.fit());
+    }
+
+    fitLater();
+    window.addEventListener("resize", fitLater);
+
+    const wsProtocol = window.location.protocol === "https:" ? "wss" : "ws";
+    const socket = new WebSocket(`${wsProtocol}://${window.location.host}/ws`);
+    const textDecoder = new TextDecoder("utf-8", { fatal: false });
+
+    function decodeBase64ToString(b64) {
+      const binary = atob(b64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      return textDecoder.decode(bytes);
+    }
+
+    socket.addEventListener("open", () => {
+      fitLater();
+      term.focus();
+    });
+
+    socket.addEventListener("message", (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        if (payload.type === "output") {
+          term.write(decodeBase64ToString(payload.data));
+        } else if (payload.type === "exit") {
+          term.write("\\r\\n[dos-shell exited]\\r\\n");
+        }
+      } catch (err) {
+        console.error("failed to process message", err);
+      }
+    });
+
+    socket.addEventListener("close", (event) => {
+      term.write(`\\r\\n[connection closed: ${event.code}]\\r\\n`);
+    });
+
+    socket.addEventListener("error", (event) => {
+      console.error("websocket error", event);
+      term.write("\\r\\n[websocket error]\\r\\n");
+    });
+
+    term.onData((data) => {
+      socket.send(JSON.stringify({ type: "input", data }));
+    });
+
+    term.onResize(({ cols, rows }) => {
+      socket.send(JSON.stringify({ type: "resize", cols, rows }));
+    });
+  </script>
+</body>
+</html>
+"""
+
+
+def set_winsize(fd: int, rows: int, cols: int) -> None:
+    packed = struct.pack("HHHH", rows, cols, 0, 0)
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, packed)
+
+
+def spawn_shell(username: str, shell_path: str, env: Optional[Dict[str, str]] = None) -> Tuple[int, int]:
+    try:
+        pw_record = pwd.getpwnam(username)
+    except KeyError as exc:
+        raise RuntimeError(f"Unable to resolve user '{username}'") from exc
+
+    base_env = os.environ.copy()
+    if env:
+        base_env.update(env)
+
+    base_env["TERM"] = base_env.get("TERM", "xterm-256color")
+    base_env["HOME"] = pw_record.pw_dir
+    base_env["LOGNAME"] = username
+    base_env["USER"] = username
+    base_env["SHELL"] = shell_path
+    base_env.setdefault("PWD", pw_record.pw_dir)
+
+    pid, master_fd = pty.fork()
+    if pid == 0:
+        try:
+            os.chdir(pw_record.pw_dir)
+        except FileNotFoundError:
+            os.chdir("/")
+
+        try:
+            os.setsid()
+        except OSError:
+            pass
+
+        try:
+            os.umask(0o22)
+        except Exception:
+            pass
+
+        if os.getuid() == 0:
+            try:
+                os.initgroups(username, pw_record.pw_gid)
+            except PermissionError:
+                pass
+            os.setgid(pw_record.pw_gid)
+            os.setuid(pw_record.pw_uid)
+
+        os.environ.clear()
+        os.environ.update(base_env)
+
+        try:
+            os.execvpe(shell_path, [shell_path], os.environ)
+        except Exception as exc:
+            LOG.error("execvpe failed: %%s", exc, exc_info=True)
+            os._exit(1)  # noqa: SLF001
+
+    os.set_blocking(master_fd, False)
+    return pid, master_fd
+
+
+class ShellSession:
+    def __init__(self, username: str, shell_path: str, term_rows: int, term_cols: int):
+        self.username = username
+        self.shell_path = shell_path
+        self.term_rows = term_rows
+        self.term_cols = term_cols
+
+        self.pid: Optional[int] = None
+        self.fd: Optional[int] = None
+        self.loop = asyncio.get_running_loop()
+        self.ws: Optional[web.WebSocketResponse] = None
+        self._reader_active = False
+        self._closed = asyncio.Event()
+
+    async def start(self, ws: web.WebSocketResponse) -> None:
+        self.ws = ws
+        self.pid, self.fd = spawn_shell(self.username, self.shell_path)
+        set_winsize(self.fd, self.term_rows, self.term_cols)
+        self.loop.add_reader(self.fd, self._on_pty_ready)
+        self._reader_active = True
+        LOG.debug("Spawned dos-shell pid=%s fd=%s", self.pid, self.fd)
+
+    def _on_pty_ready(self) -> None:
+        if self.fd is None or self.ws is None or self.ws.closed:
+            return
+        try:
+            data = os.read(self.fd, 4096)
+        except OSError as exc:
+            if exc.errno in (errno.EIO, errno.EBADF):
+                data = b""
+            else:
+                LOG.warning("read error from PTY: exc=%s", exc)
+                return
+
+        if data:
+            payload = base64.b64encode(data).decode("ascii")
+            asyncio.create_task(self._send({"type": "output", "data": payload}))
+            return
+
+        LOG.debug("PTY produced zero bytes; closing websocket")
+        asyncio.create_task(self._send({"type": "exit"}))
+        asyncio.create_task(self.ws.close())
+
+    async def _send(self, message: Dict[str, object]) -> None:
+        if self.ws is None or self.ws.closed:
+            return
+        try:
+            await self.ws.send_str(json.dumps(message))
+        except ConnectionResetError:
+            LOG.debug("websocket reset during send")
+        except RuntimeError as exc:
+            LOG.debug("unable to send on websocket: %s", exc)
+
+    async def write(self, data: bytes) -> None:
+        if self.fd is None:
+            return
+        try:
+            await asyncio.to_thread(os.write, self.fd, data)
+        except OSError as exc:
+            LOG.debug("write failed: %s", exc)
+
+    def resize(self, rows: int, cols: int) -> None:
+        if self.fd is None:
+            return
+        rows = max(rows, 1)
+        cols = max(cols, 1)
+        try:
+            set_winsize(self.fd, rows, cols)
+        except OSError as exc:
+            LOG.debug("winsize update failed: %s", exc)
+
+    async def close(self) -> None:
+        if self._closed.is_set():
+            return
+
+        self._closed.set()
+        if self._reader_active and self.fd is not None:
+            try:
+                self.loop.remove_reader(self.fd)
+            except Exception:
+                pass
+        self._reader_active = False
+
+        if self.fd is not None:
+            try:
+                os.close(self.fd)
+            except OSError:
+                pass
+            self.fd = None
+
+        if self.pid:
+            for sig in (signal.SIGHUP, signal.SIGTERM, signal.SIGKILL):
+                try:
+                    os.kill(self.pid, sig)
+                except ProcessLookupError:
+                    break
+                await asyncio.sleep(0.1)
+                waited_pid, _ = await asyncio.to_thread(os.waitpid, self.pid, os.WNOHANG)
+                if waited_pid == self.pid:
+                    break
+            try:
+                await asyncio.to_thread(os.waitpid, self.pid, 0)
+            except ChildProcessError:
+                pass
+            self.pid = None
+
+
+async def index_handler(_request: web.Request) -> web.StreamResponse:
+    return web.Response(text=HTML_PAGE, content_type="text/html", headers={"Cache-Control": "no-store"})
+
+
+async def health_handler(_request: web.Request) -> web.Response:
+    return web.Response(text="ok\n", content_type="text/plain")
+
+
+async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
+    ws = web.WebSocketResponse(heartbeat=30)
+    await ws.prepare(request)
+
+    cfg = request.app["config"]
+    session = ShellSession(cfg.user, cfg.shell_path, cfg.default_rows, cfg.default_cols)
+    await session.start(ws)
+
+    try:
+        async for msg in ws:
+            if msg.type == WSMsgType.TEXT:
+                try:
+                    payload = json.loads(msg.data)
+                except json.JSONDecodeError:
+                    continue
+
+                if payload.get("type") == "input":
+                    await session.write(payload.get("data", "").encode("utf-8", "ignore"))
+                elif payload.get("type") == "resize":
+                    rows = int(payload.get("rows", cfg.default_rows))
+                    cols = int(payload.get("cols", cfg.default_cols))
+                    session.resize(rows, cols)
+            elif msg.type == WSMsgType.ERROR:
+                LOG.warning("websocket error: %s", ws.exception())
+                break
+    finally:
+        await session.close()
+
+    return ws
+
+
+class AppConfig:
+    def __init__(self, user: str, shell_path: str, host: str, port: int, rows: int, cols: int):
+        self.user = user
+        self.shell_path = shell_path
+        self.host = host
+        self.port = port
+        self.default_rows = rows
+        self.default_cols = cols
+
+
+def build_argument_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="SvarBox web console")
+    parser.add_argument("--host", default=os.environ.get("DOS_HTTP_HOST", "0.0.0.0"), help="Address to bind")
+    parser.add_argument("--port", type=int, default=int(os.environ.get("DOS_HTTP_PORT", "8080")), help="Port to bind")
+    parser.add_argument(
+        "--shell",
+        default=os.environ.get("DOS_HTTP_SHELL", "/usr/local/bin/dos-shell"),
+        help="Path to the DOS shell launcher",
+    )
+    parser.add_argument(
+        "--user",
+        default=os.environ.get("DOS_HTTP_USER", "dosuser"),
+        help="System user the PTY session should run as",
+    )
+    parser.add_argument("--rows", type=int, default=int(os.environ.get("DOS_HTTP_ROWS", "25")), help="Default rows")
+    parser.add_argument("--cols", type=int, default=int(os.environ.get("DOS_HTTP_COLS", "80")), help="Default columns")
+    parser.add_argument(
+        "--log-level",
+        default=os.environ.get("DOS_HTTP_LOG_LEVEL", "INFO"),
+        choices=["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"],
+        help="Log verbosity",
+    )
+    return parser
+
+
+def configure_logging(level: str) -> None:
+    logging.basicConfig(level=getattr(logging, level.upper(), logging.INFO), format="%(asctime)s %(levelname)s %(message)s")
+
+
+async def create_app(cfg: AppConfig) -> web.Application:
+    app = web.Application()
+    app["config"] = cfg
+    app.add_routes(
+        [
+            web.get("/", index_handler),
+            web.get("/healthz", health_handler),
+            web.get("/ws", websocket_handler),
+        ]
+    )
+    return app
+
+
+def main() -> None:
+    parser = build_argument_parser()
+    args = parser.parse_args()
+    configure_logging(args.log_level)
+
+    cfg = AppConfig(
+        user=args.user,
+        shell_path=args.shell,
+        host=args.host,
+        port=args.port,
+        rows=args.rows,
+        cols=args.cols,
+    )
+
+    app = asyncio.run(create_app(cfg))
+
+    web.run_app(app, host=cfg.host, port=cfg.port, print=None, access_log=None)
+
+
+if __name__ == "__main__":
+    main()

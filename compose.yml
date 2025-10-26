@@ -9,11 +9,14 @@ services:
     ports:
       - "${DOS_SSH_PORT:-2222}:22"
       - "${DOS_TELNET_PORT:-2323}:23"
+      - "${DOS_HTTP_PORT:-8080}:${DOS_HTTP_PORT:-8080}"
     environment:
       DOS_ALLOW_MODE: ${DOS_ALLOW_MODE:-all}
       ENABLE_TELNET: ${ENABLE_TELNET:-1}
       TELNET_PORT: ${TELNET_PORT:-23}
       TELNET_LOGIN: /bin/login
+      ENABLE_HTTP_CONSOLE: ${ENABLE_HTTP_CONSOLE:-1}
+      DOS_HTTP_PORT: ${DOS_HTTP_PORT:-8080}
     volumes:
       - ./allowed_repo:/opt/allowed_repo:z
       - ./config/dos_allowed:/etc/dos_allowed:ro,z

@@ -34,6 +34,7 @@ Default access:
 - **Password:** `dosuser`
 - **SSH:** `ssh -X dosuser@localhost -p 2222`
 - **Telnet (optional):** `telnet localhost 2323` (disabled if `ENABLE_TELNET=0`)
+- **Web console:** `http://localhost:8080` (disable with `ENABLE_HTTP_CONSOLE=0`)
 
 Use `exit` from the DOS shell to terminate the session; the container keeps running for the next login.
 
@@ -42,7 +43,7 @@ All persistent user data inside the guest lives under `/home/dosuser/.dosemu`, w
 ## How the Container Boots
 
 1. **`prepare-svardos`** runs during build, downloading the latest SvarDOS ZIP (override with `SVARDOS_IMG_URL`) and staging it under `/opt/svardos/base`.
-2. **`start-dos-services`** starts BusyBox `telnetd` (if enabled) and then `sshd`.
+2. **`start-dos-services`** starts the optional web console, BusyBox `telnetd` (if enabled), and then `sshd`.
 3. Whenever `dosuser` logs in, **`dos-shell`**:
    - Detects terminal mode (X11 window, terminal, or dumb) and composes the corresponding `dosemu` flags.
    - Ensures a private C: drive under `/home/dosuser/.dosemu/drive_c`, copying SvarDOS files if the sentinel `.svardos_installed` is missing or if you asked for a reinstall.
@@ -124,7 +125,9 @@ You can override which binary is used for the Linux side by setting `DOS_LINUX_S
 | `DOS_CONTAINER_NAME`     | `svarbox`           | Name of the running container.                           |
 | `DOS_SSH_PORT`           | `2222`              | Host port forwarded to container port 22.                |
 | `DOS_TELNET_PORT`        | `2323`              | Host port forwarded to container port 23.                |
+| `DOS_HTTP_PORT`          | `8080`              | Host port forwarded to the web console.                  |
 | `ENABLE_TELNET`          | `1`                 | Toggle BusyBox telnetd.                                  |
+| `ENABLE_HTTP_CONSOLE`    | `1`                 | Launch the built-in web terminal.                        |
 | `TELNET_PORT`            | `23`                | Port inside the container where telnetd listens.         |
 | `TELNET_LOGIN`           | `/bin/login`        | Login command invoked by telnetd.                        |
 | `DOS_ALLOW_MODE`         | `all`               | Passed straight through to `dos-shell`.                  |
@@ -135,6 +138,7 @@ Example `.env` snippet:
 ```
 DOS_SSH_PORT=2022
 ENABLE_TELNET=0
+ENABLE_HTTP_CONSOLE=0
 DOS_ALLOW_MODE=list
 SVARDOS_IMG_URL=https://example.com/custom-svardos.zip
 ```
@@ -167,7 +171,7 @@ You can launch the container directly:
 ```sh
 docker build -t svarbox .
 docker run -d --name svarbox \
-  -p 2222:22 -p 2323:23 \
+  -p 2222:22 -p 2323:23 -p 8080:8080 \
   -v "$(pwd)/allowed_repo:/opt/allowed_repo" \
   -v "$(pwd)/config/dos_allowed:/etc/dos_allowed:ro" \
   -v "$(pwd)/dos_env:/etc/dos_env:ro" \
@@ -177,7 +181,7 @@ docker run -d --name svarbox \
 To override behaviour, append `-e` flags:
 
 ```sh
-docker run … -e ENABLE_TELNET=0 -e DOS_ALLOW_MODE=list -e DOS_AUDIO_MODE=force …
+docker run … -e ENABLE_TELNET=0 -e ENABLE_HTTP_CONSOLE=0 -e DOS_ALLOW_MODE=list -e DOS_AUDIO_MODE=force …
 ```
 
 ## Troubleshooting

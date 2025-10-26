@@ -3,13 +3,14 @@ FROM ubuntu:22.04
 ENV DEBIAN_FRONTEND=noninteractive
 
 # Install base packages and enable the dosemu2 PPA
-RUN apt-get update && apt-get install -y --no-install-recommends software-properties-common gnupg openssh-server busybox-static sudo ca-certificates curl mtools unzip file xauth acl && add-apt-repository -y ppa:dosemu2/ppa && apt-get install -y --no-install-recommends dosemu2 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends software-properties-common gnupg openssh-server busybox-static sudo ca-certificates curl mtools unzip file xauth acl python3 python3-aiohttp && add-apt-repository -y ppa:dosemu2/ppa && apt-get install -y --no-install-recommends dosemu2 && rm -rf /var/lib/apt/lists/*
 
 # Provide DOS wrapper, SvarDOS bootstrapper, and service supervisor
 COPY scripts/dos-shell /usr/local/bin/dos-shell
+COPY scripts/dos-httpd /usr/local/bin/dos-httpd
 COPY scripts/prepare-svardos.sh /usr/local/bin/prepare-svardos
 COPY scripts/start-services.sh /usr/local/bin/start-dos-services
-RUN chmod +x /usr/local/bin/dos-shell /usr/local/bin/start-dos-services /usr/local/bin/prepare-svardos && echo "/usr/local/bin/dos-shell" >> /etc/shells
+RUN chmod +x /usr/local/bin/dos-shell /usr/local/bin/dos-httpd /usr/local/bin/start-dos-services /usr/local/bin/prepare-svardos && echo "/usr/local/bin/dos-shell" >> /etc/shells
 
 # Create sshd runtime directory
 RUN mkdir -p /var/run/sshd
@@ -31,5 +32,5 @@ COPY config/dos_allowed /etc/dos_allowed
 # Configure sshd to force command for dosuser
 COPY config/sshd_config /etc/ssh/sshd_config
 
-EXPOSE 22 23
+EXPOSE 22 23 8080
 CMD ["/usr/local/bin/start-dos-services"]

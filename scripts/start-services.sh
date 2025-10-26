@@ -5,6 +5,9 @@ TELNET_PORT="${TELNET_PORT:-23}"
 TELNET_LOGIN="${TELNET_LOGIN:-/bin/login}"
 TELNETD_BIN="${TELNETD_BIN:-/bin/busybox}"
 ENABLE_TELNET="${ENABLE_TELNET:-1}"
+ENABLE_HTTP_CONSOLE="${ENABLE_HTTP_CONSOLE:-1}"
+DOS_HTTP_PORT="${DOS_HTTP_PORT:-8080}"
+DOS_HTTPD_BIN="${DOS_HTTPD_BIN:-/usr/local/bin/dos-httpd}"
 
 ensure_dosuser_home() {
   local dos_entry dos_home dos_uid dos_gid owner_uid owner_gid
@@ -77,6 +80,55 @@ ensure_dosuser_home() {
 }
 
 ensure_dosuser_home
+
+start_http_console() {
+  if [ "${ENABLE_HTTP_CONSOLE}" != "1" ]; then
+    return
+  fi
+
+  if [ ! -x "${DOS_HTTPD_BIN}" ]; then
+    echo "start-dos-services: HTTP console disabled; missing ${DOS_HTTPD_BIN}" >&2
+    return
+  fi
+
+  local args=()
+  if [ -n "${DOS_HTTP_HOST:-}" ]; then
+    args+=(--host "${DOS_HTTP_HOST}")
+  fi
+  if [ -n "${DOS_HTTP_PORT:-}" ]; then
+    args+=(--port "${DOS_HTTP_PORT}")
+  fi
+  if [ -n "${DOS_HTTP_USER:-}" ]; then
+    args+=(--user "${DOS_HTTP_USER}")
+  fi
+  if [ -n "${DOS_HTTP_SHELL:-}" ]; then
+    args+=(--shell "${DOS_HTTP_SHELL}")
+  fi
+  if [ -n "${DOS_HTTP_ROWS:-}" ]; then
+    args+=(--rows "${DOS_HTTP_ROWS}")
+  fi
+  if [ -n "${DOS_HTTP_COLS:-}" ]; then
+    args+=(--cols "${DOS_HTTP_COLS}")
+  fi
+  if [ -n "${DOS_HTTP_LOG_LEVEL:-}" ]; then
+    args+=(--log-level "${DOS_HTTP_LOG_LEVEL}")
+  fi
+
+  set +e
+  "${DOS_HTTPD_BIN}" "${args[@]}" &
+  local status=$?
+  local pid=$!
+  set -e
+
+  if [ "${status}" -ne 0 ]; then
+    echo "start-dos-services: warning: HTTP console failed to launch (exit ${status})" >&2
+    return
+  fi
+
+  echo "start-dos-services: HTTP console listening on ${DOS_HTTP_HOST:-0.0.0.0}:${DOS_HTTP_PORT} (pid ${pid})"
+}
+
+start_http_console
 
 if [ "$ENABLE_TELNET" = "1" ]; then
   if [ ! -x "$TELNETD_BIN" ]; then
