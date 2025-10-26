@@ -103,14 +103,14 @@ detect_dosemu_args() {
       DOSEMU_ARGS=(-X -K "${C_DRIVE}")
       ;;
     terminal|tty|text)
-      DOSEMU_ARGS=(-td -K "${C_DRIVE}")
+      DOSEMU_ARGS=(-t -K "${C_DRIVE}")
       ;;
     dumb)
       DOSEMU_ARGS=(-dumb -K "${C_DRIVE}")
       ;;
     *)
       echo "Unknown DOS_TERMINAL_MODE '${mode}', defaulting to terminal mode." >&2
-      DOSEMU_ARGS=(-td -K "${C_DRIVE}")
+      DOSEMU_ARGS=(-t -K "${C_DRIVE}")
       ;;
   esac
 }
