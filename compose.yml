@@ -17,6 +17,7 @@ services:
       TELNET_LOGIN: /bin/login
       ENABLE_HTTP_CONSOLE: ${ENABLE_HTTP_CONSOLE:-1}
       DOS_HTTP_PORT: ${DOS_HTTP_PORT:-8080}
+      DOS_HTTP_CRT: 0
     volumes:
       - ./allowed_repo:/opt/allowed_repo:z
       - ./config/dos_allowed:/etc/dos_allowed:ro,z
