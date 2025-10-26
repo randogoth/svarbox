@@ -20,4 +20,6 @@ services:
       - ./dos_env:/etc/dos_env:z
       - ./dos_home:/home/dosuser:z
       - ./dos_drives:/opt/dos_drives:z
+    devices:
+      - /dev/kvm:/dev/kvm
     restart: unless-stopped
