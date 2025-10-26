@@ -36,12 +36,17 @@ HTML_PAGE = """<!DOCTYPE html>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
   <style>
+    @font-face {
+      font-family: "DOSVGA";
+      src: url("/assets/WebPlus_IBM_VGA_8x16.woff") format("woff");
+      font-display: swap;
+    }
     :root, body { background: #1e1e1e; color: #f0f0f0; height: 100%; }
     body {
       margin: 0;
       display: flex;
       flex-direction: column;
-      font-family: system-ui, sans-serif;
+      font-family: "DOSVGA", "Fira Code", "Cascadia Mono", "Hack", monospace;
     }
     header {
       padding: 0.6rem 1rem;
@@ -70,6 +75,8 @@ HTML_PAGE = """<!DOCTYPE html>
     const term = new Terminal({
       cursorBlink: true,
       convertEol: true,
+      fontFamily: "DOSVGA, Fira Code, Cascadia Mono, Hack, monospace",
+      fontSize: 16,
       theme: {
         background: "#000000",
         foreground: "#f5f5f5"
@@ -315,6 +322,13 @@ async def health_handler(_request: web.Request) -> web.Response:
     return web.Response(text="ok\n", content_type="text/plain")
 
 
+async def font_handler(request: web.Request) -> web.StreamResponse:
+    cfg: "AppConfig" = request.app["config"]
+    if not cfg.font_path or not os.path.exists(cfg.font_path):
+        raise web.HTTPNotFound()
+    return web.FileResponse(path=cfg.font_path, headers={"Cache-Control": "public, max-age=86400"})
+
+
 async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
     ws = web.WebSocketResponse(heartbeat=30)
     await ws.prepare(request)
@@ -347,13 +361,14 @@ async def websocket_handler(request: web.Request) -> web.WebSocketResponse:
 
 
 class AppConfig:
-    def __init__(self, user: str, shell_path: str, host: str, port: int, rows: int, cols: int):
+    def __init__(self, user: str, shell_path: str, host: str, port: int, rows: int, cols: int, font_path: Optional[str]):
         self.user = user
         self.shell_path = shell_path
         self.host = host
         self.port = port
         self.default_rows = rows
         self.default_cols = cols
+        self.font_path = font_path
 
 
 def build_argument_parser() -> argparse.ArgumentParser:
@@ -378,6 +393,11 @@ def build_argument_parser() -> argparse.ArgumentParser:
         choices=["CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"],
         help="Log verbosity",
     )
+    parser.add_argument(
+        "--font-path",
+        default=os.environ.get("DOS_HTTP_FONT_PATH", "/usr/local/share/dos-httpd/WebPlus_IBM_VGA_8x16.woff"),
+        help="Path to the WOFF font used by the terminal UI",
+    )
     return parser
 
 
@@ -392,6 +412,7 @@ async def create_app(cfg: AppConfig) -> web.Application:
         [
             web.get("/", index_handler),
             web.get("/healthz", health_handler),
+            web.get("/assets/WebPlus_IBM_VGA_8x16.woff", font_handler),
             web.get("/ws", websocket_handler),
         ]
     )
@@ -410,6 +431,7 @@ def main() -> None:
         port=args.port,
         rows=args.rows,
         cols=args.cols,
+        font_path=args.font_path if args.font_path else None,
     )
 
     app = asyncio.run(create_app(cfg))

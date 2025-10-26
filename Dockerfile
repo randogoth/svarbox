@@ -10,6 +10,7 @@ COPY scripts/dos-shell /usr/local/bin/dos-shell
 COPY scripts/dos-httpd /usr/local/bin/dos-httpd
 COPY scripts/prepare-svardos.sh /usr/local/bin/prepare-svardos
 COPY scripts/start-services.sh /usr/local/bin/start-dos-services
+COPY WebPlus_IBM_VGA_8x16.woff /usr/local/share/dos-httpd/WebPlus_IBM_VGA_8x16.woff
 RUN chmod +x /usr/local/bin/dos-shell /usr/local/bin/dos-httpd /usr/local/bin/start-dos-services /usr/local/bin/prepare-svardos && echo "/usr/local/bin/dos-shell" >> /etc/shells
 
 # Create sshd runtime directory

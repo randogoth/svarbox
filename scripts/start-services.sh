@@ -113,6 +113,9 @@ start_http_console() {
   if [ -n "${DOS_HTTP_LOG_LEVEL:-}" ]; then
     args+=(--log-level "${DOS_HTTP_LOG_LEVEL}")
   fi
+  if [ -n "${DOS_HTTP_FONT_PATH:-}" ]; then
+    args+=(--font-path "${DOS_HTTP_FONT_PATH}")
+  fi
 
   set +e
   "${DOS_HTTPD_BIN}" "${args[@]}" &
