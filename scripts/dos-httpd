@@ -58,67 +58,50 @@ HTML_PAGE = """<!DOCTYPE html>
     }
     #workspace {
       flex: 1 1 auto;
-      position: relative;
       display: flex;
       justify-content: center;
       align-items: center;
       padding: 32px 24px 40px;
       box-sizing: border-box;
     }
-    #terminal-wrapper {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      transform-origin: center center;
-    }
-    #terminal-frame {
+    #terminal {
       display: inline-flex;
       background: #000;
       border: 1px solid #2b2b2b;
       box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
       padding: 12px;
+      width: auto;
+      height: auto;
       box-sizing: content-box;
     }
-    #terminal {
-      display: inline-block;
-    }
     #terminal .xterm {
-      width: 100% !important;
-      height: 100% !important;
+      width: auto !important;
+      height: auto !important;
     }
     #terminal .xterm-viewport {
       background-color: #000 !important;
       overflow: hidden !important;
-      width: 100% !important;
+      width: auto !important;
     }
     #terminal .xterm-rows,
     #terminal .xterm-scroll-area {
-      width: 100% !important;
-      height: 100% !important;
+      width: auto !important;
+      height: auto !important;
     }
     #terminal .xterm-screen {
-      width: 100% !important;
-      height: 100% !important;
+      width: auto !important;
+      height: auto !important;
     }
     #terminal .xterm .xterm-helper-textarea {
       width: 0 !important;
       height: 0 !important;
-    }
-    #terminal .xterm .xterm-bg-0,
-    #terminal .xterm .xterm-bg-8 {
-      background-color: rgb(14 14 14) !important;
     }
   </style>
 </head>
 <body>
   <header>SvarBox DOS Console</header>
   <main id="workspace">
-    <div id="terminal-wrapper">
-      <div id="terminal-frame">
-        <div id="terminal"></div>
-      </div>
-    </div>
+    <div id="terminal"></div>
   </main>
 
   <script type="module">
@@ -144,45 +127,6 @@ HTML_PAGE = """<!DOCTYPE html>
     const socket = new WebSocket(`${wsProtocol}://${window.location.host}/ws`);
     const textDecoder = new TextDecoder("utf-8", { fatal: false });
 
-    const wrapper = document.getElementById("terminal-wrapper");
-    const frame = document.getElementById("terminal-frame");
-
-    let nativeWidth = 0;
-    let nativeHeight = 0;
-    let hasMeasurements = false;
-
-    function measureNativeSize() {
-      const previousTransform = wrapper.style.transform;
-      wrapper.style.transform = "translate(-50%, -50%) scale(1)";
-      const rect = frame.getBoundingClientRect();
-      wrapper.style.transform = previousTransform;
-
-      if (rect.width > 0 && rect.height > 0) {
-        nativeWidth = rect.width;
-        nativeHeight = rect.height;
-        hasMeasurements = true;
-        return true;
-      }
-      return false;
-    }
-
-    function ensureMeasurements() {
-      if (hasMeasurements) {
-        return true;
-      }
-      return measureNativeSize();
-    }
-
-    function applyScale() {
-      if (!ensureMeasurements()) {
-        return;
-      }
-      const maxWidth = window.innerWidth * 0.8;
-      const maxHeight = window.innerHeight * 0.8;
-      const scale = Math.min(maxWidth / nativeWidth, maxHeight / nativeHeight);
-      wrapper.style.transform = `translate(-50%, -50%) scale(${scale})`;
-    }
-
     function decodeBase64ToString(b64) {
       const binary = atob(b64);
       const bytes = new Uint8Array(binary.length);
@@ -195,19 +139,7 @@ HTML_PAGE = """<!DOCTYPE html>
     socket.addEventListener("open", () => {
       socket.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
       term.focus();
-      applyScale();
     });
-
-    term.onRender(() => {
-      applyScale();
-    });
-
-    if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === "function") {
-      document.fonts.ready.then(() => applyScale()).catch(() => applyScale());
-    } else {
-      window.addEventListener("load", () => applyScale(), { once: true });
-    }
-    window.addEventListener("resize", () => applyScale());
 
     socket.addEventListener("message", (event) => {
       try {
