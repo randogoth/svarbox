@@ -70,6 +70,8 @@ HTML_PAGE = """<!DOCTYPE html>
       border: 1px solid #2b2b2b;
       box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
       padding: 12px;
+      transform-origin: top center;
+      transform: scaleY(1.2);
       box-sizing: content-box;
     }
     #terminal .xterm {
@@ -163,7 +165,6 @@ HTML_PAGE = """<!DOCTYPE html>
       await waitForDosvgaFont();
 
       const term = new Terminal({
-        rendererType: "canvas",
         cursorBlink: true,
         convertEol: true,
         fontFamily: "DOSVGA, Fira Code, Cascadia Mono, Hack, monospace",
