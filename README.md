@@ -1,4 +1,4 @@
-Repository moved to [https://codeberg.org/randogoth/svarbox.git](https://codeberg.org/randogoth/svarbox.git)
+Repository moved to [https://code.randogoth.com/randogoth/svarbox.git](https://code.randogoth.com/randogoth/svarbox.git)
 
 # SvarBox 
 
